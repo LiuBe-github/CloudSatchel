@@ -1,0 +1,44 @@
+[package]
+name = "asyouwish-toolbox"
+version = "0.6.0"
+description = "如意工具箱 - 纯净本地 Windows 桌面工具"
+authors = ["LiuBe"]
+edition = "2021"
+default-run = "AsYouWishToolBox"
+
+[lib]
+name = "asyouwish_toolbox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "AsYouWishToolBox"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["custom-protocol", "tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+] }
+# 完整 COM 接口（IShellLinkW / IPersistFile），用于创建启动文件夹快捷方式
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_System_Com"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,13 @@
+{
+  "name": "asyouwish-toolbox",
+  "private": true,
+  "version": "0.6.0",
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix ui run build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
