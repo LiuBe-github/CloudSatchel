@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ThemeMode } from "../vite-env";
 import { Switch } from "./Switch";
 
@@ -8,6 +9,7 @@ interface SettingsPanelProps {
   onAutostartChange: (enabled: boolean) => void;
   closeToTray: boolean;
   onCloseToTrayChange: (enabled: boolean) => void;
+  closing?: boolean;
   onClose: () => void;
 }
 
@@ -24,11 +26,21 @@ export function SettingsPanel({
   onAutostartChange,
   closeToTray,
   onCloseToTrayChange,
+  closing = false,
   onClose,
 }: SettingsPanelProps) {
+  // Esc 关闭设置面板
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel animate-menu-enter" onClick={(e) => e.stopPropagation()}>
+    <div className={`settings-overlay${closing ? " closing" : ""}`} onClick={onClose}>
+      <div className={`settings-panel${closing ? " closing" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h2 className="settings-title">设置</h2>
           <button className="icon-btn" onClick={onClose} aria-label="关闭设置">
@@ -85,7 +97,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.6.2</span>
+          <span className="settings-version">云笈 · v0.6.3</span>
         </div>
       </div>
     </div>

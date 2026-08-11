@@ -55,6 +55,8 @@ function App({ initial }: AppProps) {
     },
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false); // 是否处于展开位（控制滑入/滑出过渡）
+  const settingsTimerRef = useRef<number | null>(null);
   const [activeId, setActiveId] = useState(FEATURES[0].id);
   const [busyToggle, setBusyToggle] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -151,6 +153,28 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
+  // 设置面板：从右侧滑出（参照花笺）——打开先挂载、下一帧进入展开位触发滑入过渡；
+  // 关闭先播滑出动画（300ms 与 CSS 过渡时长一致），动画结束再卸载
+  const openSettings = useCallback(() => {
+    if (settingsTimerRef.current !== null) {
+      window.clearTimeout(settingsTimerRef.current);
+      settingsTimerRef.current = null;
+    }
+    setSettingsOpen(true);
+    requestAnimationFrame(() => setSettingsVisible(true));
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setSettingsVisible(false);
+    if (settingsTimerRef.current !== null) {
+      window.clearTimeout(settingsTimerRef.current);
+    }
+    settingsTimerRef.current = window.setTimeout(() => {
+      setSettingsOpen(false);
+      settingsTimerRef.current = null;
+    }, 300);
+  }, []);
+
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
   const featureOn = isTaskbar ? state.taskbarTransparent : state.enabled;
@@ -173,7 +197,7 @@ function App({ initial }: AppProps) {
         <div className="titlebar-actions">
           <button
             className={`icon-btn ${settingsOpen ? "active" : ""}`}
-            onClick={() => setSettingsOpen((v) => !v)}
+            onClick={() => (settingsOpen ? closeSettings() : openSettings())}
             aria-label="设置"
             title="设置"
           >
@@ -219,7 +243,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.6.2</div>
+          <div className="sidebar-version">v0.6.3</div>
           </div>
         </aside>
 
@@ -267,7 +291,8 @@ function App({ initial }: AppProps) {
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
-          onClose={() => setSettingsOpen(false)}
+          closing={!settingsVisible}
+          onClose={closeSettings}
         />
       )}
 

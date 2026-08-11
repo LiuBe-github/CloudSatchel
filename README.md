@@ -43,7 +43,7 @@ Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 
 | 产物 | 位置 |
 | --- | --- |
 | 免安装便携版 EXE | `src-tauri\target\release\CloudSatchel.exe` |
-| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\云笈_0.6.2_x64-setup.exe` |
+| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\云笈_0.6.3_x64-setup.exe` |
 
 生成安装包：在项目根目录执行 `npm run tauri build`（首次会下载 NSIS 工具链）。
 
@@ -146,9 +146,10 @@ CloudSatchel/
 
 ---
 
-**版本**: v0.6.2
+**版本**: v0.6.3
 
 **更新日志**:
+- v0.6.3 (2026-08-11): 设置面板改为从窗口右侧滑出（参照花笺 Floral 交互）——带滑入/滑出过渡动画与背景遮罩，支持 Esc 关闭
 - v0.6.2 (2026-08-11): 新增「关闭到托盘」设置开关——开启时点击关闭窗口最小化到托盘继续后台运行，关闭时点击关闭直接退出软件（移除原关闭询问弹窗）
 - v0.6.1 (2026-08-11): 修复透明任务栏反复弹出“TranslucentTB 已更新，请重启 Windows”误报——关闭功能时不再删除引擎目录，并把引擎文件时间戳与临时副本对齐，避免 TranslucentTB 因无法覆盖被 Explorer 锁定的临时 TAP 而误判为版本更新
 - v0.6.0 (2026-08-11): 正式定名「云笈」（Cloud Satchel）。重做双击触发判定：弃用跨进程 LVM 带指针消息（`LVM_GETITEMAT` / `LVM_GETITEMPOSITION`），此类消息跨进程既不可靠、还会让 Explorer 在 `comctl32.dll` 内访问违例崩溃重启；改为基于桌面列表选中状态的无指针判定（点图标会选中该项、点空白会取消选中，仅“无选中项”才触发隐藏），修复“双击桌面图标进入应用时误隐藏图标”与“双击显示图标时资源管理器崩溃重启”
