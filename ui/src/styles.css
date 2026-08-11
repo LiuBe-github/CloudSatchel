@@ -486,8 +486,8 @@ button {
   transform: translateX(21px);
 }
 
-/* ---------- 设置面板（花笺 Floral 式：主内容区右侧推开，宽 0↔320px 过渡，不遮挡任何按钮） ---------- */
-.settings-panel {
+/* ---------- 侧边面板（花笺 Floral 式：主内容区右侧推开，宽 0↔320px 过渡，不遮挡任何按钮） ---------- */
+.side-panel {
   position: relative;
   flex-shrink: 0;
   height: 100%;
@@ -498,12 +498,12 @@ button {
     width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
     border-color 0.3s ease;
 }
-.settings-panel.open {
+.side-panel.open {
   width: 320px;
   border-color: var(--color-paper-deep);
 }
 
-.settings-panel-inner {
+.side-panel-inner {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -521,10 +521,55 @@ button {
     opacity 0.3s ease,
     transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.settings-panel-inner.visible {
+.side-panel-inner.visible {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+/* ---------- 关于面板 ---------- */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0 4px;
+}
+.about-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 13px;
+  box-shadow: 0 2px 10px var(--color-shadow-deep);
+}
+.about-titles {
+  min-width: 0;
+}
+.about-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.about-version {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--color-ink-faint);
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+}
+.about-desc {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-soft);
+}
+.about-link {
+  font-size: 12px;
+  color: var(--color-bamboo);
+  word-break: break-all;
+  user-select: text;
+}
+.about-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-ink-faint);
 }
 
 .settings-header {

@@ -16,6 +16,7 @@ import { changeTheme, watchSystemTheme, useThemeInit } from "./lib/theme";
 import type { AppState, ThemeMode } from "./vite-env";
 import { Switch } from "./components/Switch";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { AboutPanel } from "./components/AboutPanel";
 import { Toast, type ToastHandle } from "./components/Toast";
 import appIcon from "./assets/app-icon.png";
 
@@ -54,7 +55,7 @@ function App({ initial }: AppProps) {
       closeToTray: true,
     },
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidePanel, setSidePanel] = useState<"settings" | "about" | null>(null);
   const [activeId, setActiveId] = useState(FEATURES[0].id);
   const [busyToggle, setBusyToggle] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -151,9 +152,10 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
-  // 设置面板（花笺 Floral 式）：始终挂载在主内容区 flex 行内，宽 0↔320px 过渡推开内容
-  const openSettings = useCallback(() => setSettingsOpen(true), []);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  // 侧边面板（花笺 Floral 式）：设置 / 关于 共用主内容区右侧推开面板
+  const openSettings = useCallback(() => setSidePanel("settings"), []);
+  const openAbout = useCallback(() => setSidePanel("about"), []);
+  const closeSidePanel = useCallback(() => setSidePanel(null), []);
 
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
@@ -176,14 +178,26 @@ function App({ initial }: AppProps) {
         </div>
         <div className="titlebar-actions">
           <button
-            className={`icon-btn ${settingsOpen ? "active" : ""}`}
-            onClick={() => (settingsOpen ? closeSettings() : openSettings())}
+            className={`icon-btn ${sidePanel === "settings" ? "active" : ""}`}
+            onClick={() => (sidePanel === "settings" ? closeSidePanel() : openSettings())}
             aria-label="设置"
             title="设置"
           >
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3.2" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <button
+            className={`icon-btn ${sidePanel === "about" ? "active" : ""}`}
+            onClick={() => (sidePanel === "about" ? closeSidePanel() : openAbout())}
+            aria-label="关于"
+            title="关于"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5" />
+              <path d="M12 7.5h.01" />
             </svg>
           </button>
           <button className="win-btn" onClick={minimize} aria-label="最小化" title="最小化">
@@ -223,7 +237,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.6.5</div>
+          <div className="sidebar-version">v0.6.6</div>
           </div>
         </aside>
 
@@ -263,15 +277,16 @@ function App({ initial }: AppProps) {
         </section>
 
         <SettingsPanel
-          open={settingsOpen}
+          open={sidePanel === "settings"}
           theme={state.theme}
           onThemeChange={handleTheme}
           autostart={state.autostart}
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
-          onClose={closeSettings}
+          onClose={closeSidePanel}
         />
+        <AboutPanel open={sidePanel === "about"} onClose={closeSidePanel} />
       </main>
 
       <Toast ref={toastRef} />

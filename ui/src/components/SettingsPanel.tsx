@@ -39,10 +39,10 @@ export function SettingsPanel({
   }, [onClose]);
 
   return (
-    <div className={`settings-panel${open ? " open" : ""}`}>
-      <div className={`settings-panel-inner${open ? " visible" : ""}`}>
+    <div className={`side-panel${open ? " open" : ""}`}>
+      <div className={`side-panel-inner${open ? " visible" : ""}`}>
         <div className="settings-header">
-          <h2 className="settings-title">设置</h2>
+          <h2 className="settings-title">应用设置</h2>
           <button className="icon-btn" onClick={onClose} aria-label="关闭设置">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M18 6 6 18M6 6l12 12" />
@@ -97,7 +97,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.6.5</span>
+          <span className="settings-version">云笈 · v0.6.6</span>
         </div>
       </div>
     </div>
