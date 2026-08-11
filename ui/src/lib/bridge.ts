@@ -9,32 +9,38 @@ export const inTauri = (): boolean =>
 
 export async function getState(): Promise<AppState> {
   if (!inTauri())
-    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: false };
+    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: false, closeToTray: true };
   return (await invoke<AppState>("get_state")) as AppState;
 }
 
 export async function setEnabled(enabled: boolean): Promise<AppState> {
   if (!inTauri())
-    return { enabled, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: false };
+    return { enabled, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: false, closeToTray: true };
   return (await invoke<AppState>("set_enabled", { enabled })) as AppState;
 }
 
 export async function setTaskbarTransparent(enabled: boolean): Promise<AppState> {
   if (!inTauri())
-    return { enabled: true, iconsHidden: false, taskbarTransparent: enabled, theme: "system", animating: false, autostart: false };
+    return { enabled: true, iconsHidden: false, taskbarTransparent: enabled, theme: "system", animating: false, autostart: false, closeToTray: true };
   return (await invoke<AppState>("set_taskbar_transparent", { enabled })) as AppState;
 }
 
 export async function setTheme(mode: ThemeMode): Promise<AppState> {
   if (!inTauri())
-    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: mode, animating: false, autostart: false };
+    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: mode, animating: false, autostart: false, closeToTray: true };
   return (await invoke<AppState>("set_theme", { mode })) as AppState;
 }
 
 export async function setAutostart(enabled: boolean): Promise<AppState> {
   if (!inTauri())
-    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: enabled };
+    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: enabled, closeToTray: true };
   return (await invoke<AppState>("set_autostart", { enabled })) as AppState;
+}
+
+export async function setCloseToTray(enabled: boolean): Promise<AppState> {
+  if (!inTauri())
+    return { enabled: true, iconsHidden: false, taskbarTransparent: false, theme: "system", animating: false, autostart: false, closeToTray: enabled };
+  return (await invoke<AppState>("set_close_to_tray", { enabled })) as AppState;
 }
 
 export function minimize(): void {
@@ -50,27 +56,6 @@ export function toggleMaximize(): void {
 export function close(): void {
   if (!inTauri()) return;
   void invoke("close_window");
-}
-
-/** 主窗口请求关闭（标题栏关闭按钮 / Alt+F4）——由前端弹出「最小化到托盘 / 退出」询问 */
-export function onCloseRequested(cb: () => void): () => void {
-  if (!inTauri()) return () => {};
-  const unlisten = listen("close-requested", () => cb());
-  return () => {
-    void unlisten.then((fn) => fn());
-  };
-}
-
-/** 最小化到系统托盘，继续后台运行 */
-export function hideToTray(): void {
-  if (!inTauri()) return;
-  void invoke("hide_to_tray");
-}
-
-/** 直接退出软件（后端会先恢复桌面图标 / 任务栏） */
-export function quitApp(): void {
-  if (!inTauri()) return;
-  void invoke("quit_app");
 }
 
 /** 订阅后端推送的状态更新 */

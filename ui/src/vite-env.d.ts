@@ -9,4 +9,5 @@ export interface AppState {
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
+  closeToTray: boolean; // 关闭到托盘：true=关闭最小化到托盘；false=关闭直接退出
 }

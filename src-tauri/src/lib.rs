@@ -34,6 +34,7 @@ struct AppState {
     taskbar_transparent: Mutex<bool>, // 任务栏是否透明
     theme: Mutex<String>,        // light / dark / system
     autostart: Mutex<bool>,      // 开机自启动（启动文件夹快捷方式）
+    close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
 }
 
 impl Default for AppState {
@@ -46,6 +47,7 @@ impl Default for AppState {
             taskbar_transparent: Mutex::new(false),
             theme: Mutex::new("system".to_string()),
             autostart: Mutex::new(false),
+            close_to_tray: Mutex::new(true),
         }
     }
 }
@@ -59,6 +61,7 @@ struct Snapshot {
     theme: String,
     animating: bool,
     autostart: bool,
+    close_to_tray: bool,
 }
 
 fn snapshot(state: &AppState) -> Snapshot {
@@ -69,6 +72,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         theme: state.theme.lock().unwrap().clone(),
         animating: *state.animating.lock().unwrap(),
         autostart: *state.autostart.lock().unwrap(),
+        close_to_tray: *state.close_to_tray.lock().unwrap(),
     }
 }
 
@@ -225,6 +229,18 @@ fn set_autostart(
 }
 
 #[tauri::command]
+fn set_close_to_tray(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Result<Snapshot, String> {
+    *state.close_to_tray.lock().unwrap() = enabled;
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    Ok(snap)
+}
+
+#[tauri::command]
 fn minimize_window(window: tauri::Window) {
     let _ = window.minimize();
 }
@@ -363,6 +379,7 @@ pub fn run() {
             set_theme,
             set_taskbar_transparent,
             set_autostart,
+            set_close_to_tray,
             minimize_window,
             toggle_maximize_window,
             close_window,
@@ -386,9 +403,20 @@ pub fn run() {
                 cleanup_on_exit(window.app_handle());
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 关闭窗口不直接退出：交由前端询问「最小化到托盘 / 直接退出」
+                // 关闭行为由设置「关闭到托盘」决定：
+                // 开 → 隐藏到托盘继续后台运行；关 → 清理后直接退出
                 api.prevent_close();
-                let _ = window.app_handle().emit("close-requested", ());
+                let app = window.app_handle();
+                let close_to_tray = *app
+                    .state::<std::sync::Arc<AppState>>()
+                    .close_to_tray
+                    .lock()
+                    .unwrap();
+                if close_to_tray {
+                    let _ = window.hide();
+                } else {
+                    cleanup_and_quit(app);
+                }
             }
             _ => {}
         })

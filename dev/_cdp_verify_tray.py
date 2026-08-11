@@ -157,6 +157,7 @@ def main():
         state = cdp.eval("window.__TAURI_INTERNALS__.invoke('get_state')")
         ok &= check("get_state 正常", isinstance(state, dict) and state.get("theme") == "system", str(state))
         ok &= check("get_state 含 autostart", isinstance(state, dict) and "autostart" in state)
+        ok &= check("get_state 含 closeToTray", isinstance(state, dict) and "closeToTray" in state)
         ok &= check("标题栏使用新图标", cdp.eval("document.querySelector('.brand-img') !== null"))
 
         # 开机自启动：开启 → 启动文件夹出现快捷方式；关闭 → 快捷方式删除
@@ -174,27 +175,20 @@ def main():
         ok &= check("关闭自启动", isinstance(st, dict) and st.get("autostart") is False, str(st))
         ok &= check("快捷方式已删除", not lnk.exists())
 
-        # 关闭窗口 → 前端应弹出询问
+        # 「关闭到托盘」默认开启：点击关闭 → 窗口隐藏、进程存活（后台继续运行）
         cdp.eval("window.__TAURI_INTERNALS__.invoke('close_window')")
-        time.sleep(1.0)
-        dialog = cdp.eval("document.querySelector('.dialog-card') !== null")
-        ok &= check("关闭时弹出询问", dialog)
-        if dialog:
-            title = cdp.eval("document.querySelector('.dialog-title')?.textContent")
-            ok &= check("询问标题正确", title == "关闭云笈？", str(title))
+        time.sleep(0.8)
+        ok &= check("关闭到托盘：进程存活", proc.poll() is None)
 
-            # 点「最小化到托盘」→ 窗口隐藏、进程存活
-            cdp.eval("document.querySelectorAll('.dialog-btn.primary')[0].click()")
-            time.sleep(0.8)
-            ok &= check("最小化到托盘后进程存活", proc.poll() is None)
-
-        # 直接退出（后端恢复后结束进程）
-        cdp.eval("window.__TAURI_INTERNALS__.invoke('quit_app')")
+        # 关闭到托盘 = OFF：点击关闭 → 直接退出（后端先恢复桌面与任务栏）
+        st = cdp.eval("window.__TAURI_INTERNALS__.invoke('set_close_to_tray', { enabled: false })")
+        ok &= check("关闭到托盘设置生效", isinstance(st, dict) and st.get("closeToTray") is False, str(st))
+        cdp.eval("window.__TAURI_INTERNALS__.invoke('close_window')")
         for _ in range(30):
             if proc.poll() is not None:
                 break
             time.sleep(0.3)
-        ok &= check("quit_app 后进程退出", proc.poll() is not None)
+        ok &= check("关闭到托盘=关：进程退出", proc.poll() is not None)
     finally:
         if proc.poll() is None:
             proc.terminate()

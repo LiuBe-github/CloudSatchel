@@ -6,6 +6,8 @@ interface SettingsPanelProps {
   onThemeChange: (mode: ThemeMode) => void;
   autostart: boolean;
   onAutostartChange: (enabled: boolean) => void;
+  closeToTray: boolean;
+  onCloseToTrayChange: (enabled: boolean) => void;
   onClose: () => void;
 }
 
@@ -15,7 +17,15 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
   { value: "dark", label: "深色", icon: "☾" },
 ];
 
-export function SettingsPanel({ theme, onThemeChange, autostart, onAutostartChange, onClose }: SettingsPanelProps) {
+export function SettingsPanel({
+  theme,
+  onThemeChange,
+  autostart,
+  onAutostartChange,
+  closeToTray,
+  onCloseToTrayChange,
+  onClose,
+}: SettingsPanelProps) {
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-panel animate-menu-enter" onClick={(e) => e.stopPropagation()}>
@@ -47,13 +57,20 @@ export function SettingsPanel({ theme, onThemeChange, autostart, onAutostartChan
         </div>
 
         <div className="settings-section">
-          <div className="settings-label">启动</div>
+          <div className="settings-label">启动与退出</div>
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">开机自启动</div>
               <div className="setting-row-desc">登录 Windows 后自动启动本应用（启动文件夹快捷方式，不写注册表）</div>
             </div>
             <Switch checked={autostart} onChange={() => onAutostartChange(!autostart)} />
+          </div>
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">关闭到托盘</div>
+              <div className="setting-row-desc">点击关闭窗口时最小化到系统托盘继续后台运行；关闭后点击关闭直接退出软件</div>
+            </div>
+            <Switch checked={closeToTray} onChange={() => onCloseToTrayChange(!closeToTray)} />
           </div>
         </div>
 
@@ -63,12 +80,12 @@ export function SettingsPanel({ theme, onThemeChange, autostart, onAutostartChan
             <li><span className="purity-check">✓</span>纯本地运行，不联网</li>
             <li><span className="purity-check">✓</span>不写注册表（自启动仅用启动文件夹快捷方式）</li>
             <li><span className="purity-check">✓</span>退出时自动恢复桌面图标</li>
-            <li><span className="purity-check">✓</span>后台驻留与开机自启动均为可选项，默认关闭</li>
+            <li><span className="purity-check">✓</span>后台驻留由「关闭到托盘」开关控制（默认开）；开机自启动默认关闭</li>
           </ul>
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.6.1</span>
+          <span className="settings-version">云笈 · v0.6.2</span>
         </div>
       </div>
     </div>

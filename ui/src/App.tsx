@@ -6,20 +6,17 @@ import {
   setEnabled,
   setTaskbarTransparent,
   setAutostart,
+  setCloseToTray,
   close,
   minimize,
   toggleMaximize,
   onStateUpdate,
-  onCloseRequested,
-  hideToTray,
-  quitApp,
 } from "./lib/bridge";
 import { changeTheme, watchSystemTheme, useThemeInit } from "./lib/theme";
 import type { AppState, ThemeMode } from "./vite-env";
 import { Switch } from "./components/Switch";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Toast, type ToastHandle } from "./components/Toast";
-import { CloseDialog } from "./components/CloseDialog";
 import appIcon from "./assets/app-icon.png";
 
 const FEATURES = [
@@ -54,12 +51,12 @@ function App({ initial }: AppProps) {
       theme: "system",
       animating: false,
       autostart: false,
+      closeToTray: true,
     },
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeId, setActiveId] = useState(FEATURES[0].id);
   const [busyToggle, setBusyToggle] = useState(false);
-  const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const toastRef = useRef<ToastHandle>(null);
 
@@ -73,12 +70,6 @@ function App({ initial }: AppProps) {
   // 监听 Tauri 后端推送的状态更新（桌面双击/动画进行时）
   useEffect(() => {
     const unlisten = onStateUpdate((s) => setState(s));
-    return unlisten;
-  }, []);
-
-  // 关闭窗口请求：弹出「最小化到托盘 / 直接退出」询问
-  useEffect(() => {
-    const unlisten = onCloseRequested(() => setClosePromptOpen(true));
     return unlisten;
   }, []);
 
@@ -149,14 +140,15 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
-  const handleMinimizeToTray = useCallback(() => {
-    setClosePromptOpen(false);
-    hideToTray();
-  }, []);
-
-  const handleQuit = useCallback(() => {
-    setClosePromptOpen(false);
-    quitApp();
+  const handleCloseToTray = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setCloseToTray(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "已开启：关闭窗口时最小化到托盘" : "已关闭：关闭窗口时直接退出");
+    } catch (err) {
+      console.error("切换关闭到托盘失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
   }, []);
 
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
@@ -227,7 +219,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.5.0</div>
+          <div className="sidebar-version">v0.6.2</div>
           </div>
         </aside>
 
@@ -273,15 +265,9 @@ function App({ initial }: AppProps) {
           onThemeChange={handleTheme}
           autostart={state.autostart}
           onAutostartChange={handleAutostart}
+          closeToTray={state.closeToTray}
+          onCloseToTrayChange={handleCloseToTray}
           onClose={() => setSettingsOpen(false)}
-        />
-      )}
-
-      {closePromptOpen && (
-        <CloseDialog
-          onCancel={() => setClosePromptOpen(false)}
-          onMinimizeToTray={handleMinimizeToTray}
-          onQuit={handleQuit}
         />
       )}
 
