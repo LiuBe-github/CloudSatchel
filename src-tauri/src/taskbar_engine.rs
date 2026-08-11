@@ -12,6 +12,9 @@
 //! - disable_saving=true（引擎不写自己的设置）
 //!
 //! 关闭功能/退出应用时结束引擎进程；启动自检兜底清理异常退出遗留的引擎实例。
+//! 引擎文件保留在 `%LOCALAPPDATA%\CloudSatchel\taskbar-engine`（不随关闭删除）：
+//! 删除后重新释放会让文件时间戳变新，TranslucentTB 复制 TAP 到临时目录时
+//! 会因目标被 explorer 锁定而失败，误弹“已更新，请重启 Windows”对话框。
 
 use std::fs;
 use std::path::PathBuf;
@@ -89,7 +92,41 @@ fn engine_dir() -> PathBuf {
         .join("taskbar-engine")
 }
 
-/// 释放内嵌的引擎文件（已存在且大小一致则跳过），并总是重写我们的配置
+/// 与 TranslucentTB 的临时副本对齐 DLL 时间戳
+///
+/// TranslucentTB 每次启动都会把引擎目录中的 DLL 用
+/// `copy_file(update_existing)` 复制到 `%TEMP%\TranslucentTB\`，仅当“源比目标新”时复制。
+/// Explorer 注入后会把临时 TAP 锁住；若引擎目录文件的修改时间比临时副本新
+/// （例如旧版本在关闭时删除引擎目录、开启时重新释放），复制会因共享冲突失败，
+/// TranslucentTB 误判为“已更新”，弹出“请重启 Windows”对话框并退出。
+/// 这里在内容一致（字节数相同）时把引擎目录文件的时间戳压到不晚于临时副本，
+/// 使 update_existing 判定为无需复制；内容不一致（真正的版本更新）则保留新时间戳，
+/// 让复制照常发生（此时确实需要重启资源管理器/系统才能生效）。
+fn align_dll_timestamps_with_temp(dir: &std::path::Path, name: &str) {
+    let path = dir.join(name);
+    let Ok(src_meta) = fs::metadata(&path) else {
+        return;
+    };
+    let temp_path = std::env::temp_dir().join("TranslucentTB").join(name);
+    let Ok(temp_meta) = fs::metadata(&temp_path) else {
+        return;
+    };
+    if temp_meta.len() != src_meta.len() {
+        return; // 内容不同：真·版本更新，保留新时间戳
+    }
+    let (Ok(src_t), Ok(temp_t)) = (src_meta.modified(), temp_meta.modified()) else {
+        return;
+    };
+    if src_t > temp_t {
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(&path) {
+            let _ = f.set_modified(temp_t);
+        }
+    }
+}
+
+/// 释放内嵌的引擎文件（已存在且大小一致则跳过），并总是重写我们的配置。
+/// 注意：不要删除已释放的文件 —— 删除后下次会重新写入新时间戳，进而触发
+/// TranslucentTB 的“已更新，请重启 Windows”误弹窗（见 align_dll_timestamps_with_temp）。
 fn release_engine() -> bool {
     let dir = engine_dir();
     if fs::create_dir_all(&dir).is_err() {
@@ -105,7 +142,9 @@ fn release_engine() -> bool {
         let up_to_date = fs::metadata(&path)
             .map(|m| m.len() == data.len() as u64)
             .unwrap_or(false);
-        if !up_to_date && fs::write(&path, data).is_err() {
+        if up_to_date {
+            align_dll_timestamps_with_temp(&dir, name);
+        } else if fs::write(&path, data).is_err() {
             return false;
         }
     }
@@ -218,20 +257,6 @@ fn terminate_engine_processes() {
     }
 }
 
-/// 删除我们自己释放的引擎目录（先验证路径落在 LOCALAPPDATA 下）
-fn remove_engine_dir() {
-    let dir = engine_dir();
-    let base = local_app_data();
-    if dir.starts_with(&base)
-        && dir
-            .file_name()
-            .map(|n| n == "taskbar-engine")
-            .unwrap_or(false)
-    {
-        let _ = fs::remove_dir_all(&dir);
-    }
-}
-
 /// 启动引擎（开启透明）
 pub fn start() -> bool {
     if !release_engine() {
@@ -247,7 +272,9 @@ pub fn start() -> bool {
     }
 }
 
-/// 停止引擎（恢复任务栏），并清理残留实例与释放的引擎文件
+/// 停止引擎（恢复任务栏），并清理残留实例。
+/// 注意：保留已释放的引擎文件（不删除），避免下次开启时因时间戳变新
+/// 触发 TranslucentTB 误弹“已更新，请重启 Windows”对话框。
 pub fn stop() {
     if let Some(pid) = ENGINE_PID.lock().unwrap().take() {
         if is_process_alive(pid) {
@@ -255,7 +282,6 @@ pub fn stop() {
         }
     }
     terminate_engine_processes();
-    remove_engine_dir();
 }
 
 /// 开关入口：返回是否成功（开启失败时返回 false）
