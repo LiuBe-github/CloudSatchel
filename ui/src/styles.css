@@ -486,27 +486,45 @@ button {
   transform: translateX(21px);
 }
 
-/* ---------- 设置面板（标题栏下方、右侧滑出的浮动卡片，不遮挡任何按钮） ---------- */
+/* ---------- 设置面板（花笺 Floral 式：主内容区右侧推开，宽 0↔320px 过渡，不遮挡任何按钮） ---------- */
 .settings-panel {
-  position: fixed;
-  top: calc(52px + 12px);
-  right: 12px;
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  width: 0;
+  overflow: hidden;
+  border-left: 1px solid transparent;
+  transition:
+    width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s ease;
+}
+.settings-panel.open {
   width: 320px;
-  max-height: calc(100vh - 52px - 24px);
-  z-index: 40;
+  border-color: var(--color-paper-deep);
+}
+
+.settings-panel-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 320px;
   display: flex;
   flex-direction: column;
-  padding: 18px 22px 16px;
-  border-radius: var(--app-radius);
+  padding: 16px 20px 14px;
   background: var(--color-paper-warm);
-  border: 1px solid var(--color-paper-deep);
-  box-shadow: 0 10px 40px var(--color-shadow-deep);
   overflow-y: auto;
-  transform: translateX(0);
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateX(16px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.settings-panel.closing {
-  transform: translateX(calc(100% + 24px));
+.settings-panel-inner.visible {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .settings-header {

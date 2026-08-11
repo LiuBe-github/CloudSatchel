@@ -55,8 +55,6 @@ function App({ initial }: AppProps) {
     },
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsVisible, setSettingsVisible] = useState(false); // 是否处于展开位（控制滑入/滑出过渡）
-  const settingsTimerRef = useRef<number | null>(null);
   const [activeId, setActiveId] = useState(FEATURES[0].id);
   const [busyToggle, setBusyToggle] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -153,27 +151,9 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
-  // 设置面板：从右侧滑出（参照花笺）——打开先挂载、下一帧进入展开位触发滑入过渡；
-  // 关闭先播滑出动画（300ms 与 CSS 过渡时长一致），动画结束再卸载
-  const openSettings = useCallback(() => {
-    if (settingsTimerRef.current !== null) {
-      window.clearTimeout(settingsTimerRef.current);
-      settingsTimerRef.current = null;
-    }
-    setSettingsOpen(true);
-    requestAnimationFrame(() => setSettingsVisible(true));
-  }, []);
-
-  const closeSettings = useCallback(() => {
-    setSettingsVisible(false);
-    if (settingsTimerRef.current !== null) {
-      window.clearTimeout(settingsTimerRef.current);
-    }
-    settingsTimerRef.current = window.setTimeout(() => {
-      setSettingsOpen(false);
-      settingsTimerRef.current = null;
-    }, 300);
-  }, []);
+  // 设置面板（花笺 Floral 式）：始终挂载在主内容区 flex 行内，宽 0↔320px 过渡推开内容
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
@@ -243,7 +223,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.6.4</div>
+          <div className="sidebar-version">v0.6.5</div>
           </div>
         </aside>
 
@@ -281,20 +261,18 @@ function App({ initial }: AppProps) {
             {isTaskbar ? "任务栏背景消失 · 退出应用自动恢复" : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
-      </main>
 
-      {settingsOpen && (
         <SettingsPanel
+          open={settingsOpen}
           theme={state.theme}
           onThemeChange={handleTheme}
           autostart={state.autostart}
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
-          closing={!settingsVisible}
           onClose={closeSettings}
         />
-      )}
+      </main>
 
       <Toast ref={toastRef} />
     </div>
