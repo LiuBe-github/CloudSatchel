@@ -29,7 +29,7 @@ try {
     $sizes = 16, 24, 32, 48, 64, 128, 256
     $pngs = @()
     foreach ($s in $sizes) {
-        $p = Join-Path $env:TEMP "AsYouWishToolBox_icon_${s}.png"
+        $p = Join-Path $env:TEMP "CloudSatchel_icon_${s}.png"
         New-SizedPng $s $p
         $pngs += , @{ Size = $s; Bytes = [System.IO.File]::ReadAllBytes($p) }
     }
@@ -55,7 +55,7 @@ try {
     [System.IO.File]::WriteAllBytes((Join-Path $iconsDir 'icon.ico'), $buf.ToArray())
 
     foreach ($s in $sizes) {
-        Remove-Item -LiteralPath (Join-Path $env:TEMP "AsYouWishToolBox_icon_${s}.png") -Force
+        Remove-Item -LiteralPath (Join-Path $env:TEMP "CloudSatchel_icon_${s}.png") -Force
     }
 
     Write-Output "icons generated in $iconsDir"

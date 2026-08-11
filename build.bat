@@ -1,5 +1,5 @@
 @echo off
-rem 如意工具箱 - 构建脚本（生成发布版 EXE）
+rem 云笈 - 构建脚本（生成发布版 EXE）
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -14,7 +14,7 @@ cd ..
 
 echo [3/3] 完成！
 echo.
-echo 可执行文件: src-tauri\target\release\AsYouWishToolBox.exe
+echo 可执行文件: src-tauri\target\release\CloudSatchel.exe
 echo.
 echo 如需生成安装包，请运行: cd src-tauri ^&^& cargo tauri build
 pause

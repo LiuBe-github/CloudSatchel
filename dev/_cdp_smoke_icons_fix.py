@@ -4,7 +4,7 @@
 沙箱桌面看不到 GUI，也无法真实双击桌面图标（无 Progman），
 因此只验证运行态：set_enabled 启停 WH_MOUSE_LL 钩子线程不崩溃、进程正常退出。
 注意：本脚本用与 _cdp_verify_tray.py 相同的 9333 端口（已在本机验证可用），
-且启动前会先清理残留 AsYouWishToolBox 实例（单实例应用，残留会导致新实例直接退出）。
+且启动前会先清理残留 CloudSatchel 实例（单实例应用，残留会导致新实例直接退出）。
 """
 import os
 import subprocess
@@ -15,14 +15,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _cdp_verify_tray import Cdp, check, find_page  # noqa: E402
 
-EXE = os.path.join(HERE, "..", "src-tauri", "target", "release", "AsYouWishToolBox.exe")
+EXE = os.path.join(HERE, "..", "src-tauri", "target", "release", "CloudSatchel.exe")
 PORT = 9333  # 与 _cdp_verify_tray 一致（导入的 find_page/Cdp 内部也用 9333）
 
 
 def cleanup_existing():
     """结束残留实例，避免单实例互斥量让新实例立即退出。"""
     subprocess.run(
-        ["taskkill", "/IM", "AsYouWishToolBox.exe", "/F"],
+        ["taskkill", "/IM", "CloudSatchel.exe", "/F"],
         capture_output=True,
         check=False,
     )

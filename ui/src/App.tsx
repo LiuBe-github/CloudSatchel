@@ -176,7 +176,7 @@ function App({ initial }: AppProps) {
       <header className="titlebar" data-tauri-drag-region>
         <div className="titlebar-title" data-tauri-drag-region>
           <img className="brand-img" src={appIcon} alt="" draggable={false} />
-          如意工具箱
+          云笈
         </div>
         <div className="titlebar-actions">
           <button

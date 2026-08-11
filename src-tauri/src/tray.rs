@@ -28,7 +28,7 @@ pub fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 .expect("missing default window icon")
                 .clone(),
         )
-        .tooltip("如意工具箱")
+        .tooltip("云笈")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

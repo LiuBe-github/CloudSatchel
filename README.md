@@ -1,4 +1,4 @@
-# 如意工具箱 · AsYouWishToolBox
+# 云笈 · Cloud Satchel
 
 一个为 Windows 打造的**纯净本地桌面工具集**：界面参照「花笺 Floral Notepaper」的设计语言
 （纸感配色 + 竹青绿强调色 + 噪声纹理 + 柔和动画），技术栈为
@@ -33,7 +33,7 @@ cargo build --release
 cd ..
 
 # 3. 运行
-start src-tauri\target\release\AsYouWishToolBox.exe
+start src-tauri\target\release\CloudSatchel.exe
 ```
 
 Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 一键启动（开发模式）。
@@ -42,8 +42,8 @@ Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 
 
 | 产物 | 位置 |
 | --- | --- |
-| 免安装便携版 EXE | `src-tauri\target\release\AsYouWishToolBox.exe` |
-| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\如意工具箱_0.6.0_x64-setup.exe` |
+| 免安装便携版 EXE | `src-tauri\target\release\CloudSatchel.exe` |
+| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\云笈_0.6.0_x64-setup.exe` |
 
 生成安装包：在项目根目录执行 `npm run tauri build`（首次会下载 NSIS 工具链）。
 
@@ -67,7 +67,7 @@ Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 
 
 ```
 ┌────────────────────────────────────────────┐
-│  [图标] 如意工具箱               ⚙  —  □  ×  │   ← 无边框标题栏（可拖动）
+│  [图标] 云笈                       ⚙  —  □  ×  │   ← 无边框标题栏（可拖动）
 ├──────────────┬─────────────────────────────┤
 │  功能         │  ⟐                         │
 │  ┌────────┐  │  双击隐藏桌面图标            │
@@ -105,7 +105,7 @@ Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 
 ## 目录结构
 
 ```
-AsYouWishToolBox/
+CloudSatchel/
 ├── launch.bat / build.bat
 ├── ui/                    ← 前端（React + TS + CSS）
 │   ├── src/
@@ -148,7 +148,7 @@ AsYouWishToolBox/
 **版本**: v0.6.0
 
 **更新日志**:
-- v0.6.0 (2026-08-11): 正式定名「如意工具箱」（AsYouWishToolBox）。重做双击触发判定：弃用跨进程 LVM 带指针消息（`LVM_GETITEMAT` / `LVM_GETITEMPOSITION`），此类消息跨进程既不可靠、还会让 Explorer 在 `comctl32.dll` 内访问违例崩溃重启；改为基于桌面列表选中状态的无指针判定（点图标会选中该项、点空白会取消选中，仅“无选中项”才触发隐藏），修复“双击桌面图标进入应用时误隐藏图标”与“双击显示图标时资源管理器崩溃重启”
+- v0.6.0 (2026-08-11): 正式定名「云笈」（Cloud Satchel）。重做双击触发判定：弃用跨进程 LVM 带指针消息（`LVM_GETITEMAT` / `LVM_GETITEMPOSITION`），此类消息跨进程既不可靠、还会让 Explorer 在 `comctl32.dll` 内访问违例崩溃重启；改为基于桌面列表选中状态的无指针判定（点图标会选中该项、点空白会取消选中，仅“无选中项”才触发隐藏），修复“双击桌面图标进入应用时误隐藏图标”与“双击显示图标时资源管理器崩溃重启”
 - v0.5.0 (2026-08-11): 新增「开机自启动」设置项——设置面板一键开关，通过启动文件夹 `.lnk` 快捷方式实现（`IShellLinkW` COM，不写注册表、无需管理员权限），默认关闭
 - v0.4.0 (2026-08-11): 新增系统托盘后台运行——关闭窗口时弹出询问，可选择「最小化到托盘」（功能继续生效，点击托盘图标恢复窗口）或「直接退出」（自动恢复桌面与任务栏）；托盘右键菜单含「显示主窗口 / 退出」；全新竹青绿应用图标（纸感 + 竹枝三叶，矢量绘制，含 16~256 多尺寸 ICO）
 - v0.3.0 (2026-08-10): 技术栈迁移至 React + Tauri 2（参照花笺），界面重设计为花笺纸感风格；标题栏改为 Windows 风格；补上单实例保护、动画互斥、`custom-protocol`，修复「显示完又自动隐藏」「开关无效」「debug 版空白窗口」等系列问题

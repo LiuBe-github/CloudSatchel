@@ -68,7 +68,7 @@ export function SettingsPanel({ theme, onThemeChange, autostart, onAutostartChan
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">如意工具箱 · v0.6.0</span>
+          <span className="settings-version">云笈 · v0.6.0</span>
         </div>
       </div>
     </div>

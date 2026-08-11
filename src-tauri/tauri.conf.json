@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "如意工具箱",
+  "productName": "云笈",
   "version": "0.6.0",
-  "identifier": "com.asyouwish.toolbox",
+  "identifier": "com.cloudsatchel.app",
   "build": {
     "beforeDevCommand": "",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "如意工具箱",
+        "title": "云笈",
         "width": 760,
         "height": 560,
         "minWidth": 640,

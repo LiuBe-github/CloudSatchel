@@ -6,7 +6,7 @@
 //! 恢复任务栏外观。
 //!
 //! 本模块把官方便携版（2026.1）内嵌进二进制，首次开启时释放到
-//! `%LOCALAPPDATA%\AsYouWishToolBox\taskbar-engine`，配置为：
+//! `%LOCALAPPDATA%\CloudSatchel\taskbar-engine`，配置为：
 //! - desktop_appearance：accent=clear + color=#00000000（全透明、隐藏任务栏线条）
 //! - hide_tray=true（隐藏托盘图标）
 //! - disable_saving=true（引擎不写自己的设置）
@@ -85,7 +85,7 @@ fn local_app_data() -> PathBuf {
 
 fn engine_dir() -> PathBuf {
     local_app_data()
-        .join("AsYouWishToolBox")
+        .join("CloudSatchel")
         .join("taskbar-engine")
 }
 

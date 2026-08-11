@@ -19,7 +19,7 @@ import urllib.request
 
 EXE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "src-tauri", "target", "release", "AsYouWishToolBox.exe",
+    "src-tauri", "target", "release", "CloudSatchel.exe",
 )
 PORT = 9333
 
@@ -164,7 +164,7 @@ def main():
             pathlib.Path(os.environ["APPDATA"])
             / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
         )
-        lnk = startup_dir / "如意工具箱.lnk"
+        lnk = startup_dir / "云笈.lnk"
         if lnk.exists():
             lnk.unlink()
         st = cdp.eval("window.__TAURI_INTERNALS__.invoke('set_autostart', { enabled: true })")
@@ -181,7 +181,7 @@ def main():
         ok &= check("关闭时弹出询问", dialog)
         if dialog:
             title = cdp.eval("document.querySelector('.dialog-title')?.textContent")
-            ok &= check("询问标题正确", title == "关闭如意工具箱？", str(title))
+            ok &= check("询问标题正确", title == "关闭云笈？", str(title))
 
             # 点「最小化到托盘」→ 窗口隐藏、进程存活
             cdp.eval("document.querySelectorAll('.dialog-btn.primary')[0].click()")

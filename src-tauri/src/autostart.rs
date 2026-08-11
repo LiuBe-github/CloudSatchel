@@ -15,7 +15,7 @@ use windows::Win32::UI::Shell::{
     IShellLinkW, SHGetKnownFolderPath, ShellLink, KNOWN_FOLDER_FLAG, FOLDERID_Startup,
 };
 
-const STARTUP_FILE_NAME: &str = "如意工具箱.lnk";
+const STARTUP_FILE_NAME: &str = "云笈.lnk";
 
 /// 用户启动文件夹路径
 fn startup_folder() -> Result<PathBuf, String> {
@@ -68,7 +68,7 @@ fn create_shortcut() -> Result<(), String> {
             let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
             let exe_h = HSTRING::from(exe_str.as_str());
             let dir_h = HSTRING::from(dir_str.as_str());
-            let desc_h = HSTRING::from("如意工具箱 · 开机自启动");
+            let desc_h = HSTRING::from("云笈 · 开机自启动");
             link.SetPath(&exe_h)?;
             link.SetWorkingDirectory(&dir_h)?;
             link.SetDescription(&desc_h)?;

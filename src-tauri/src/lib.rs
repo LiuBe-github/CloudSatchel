@@ -1,4 +1,4 @@
-//! 如意工具箱（AsYouWishToolBox）· Tauri 2 应用
+//! 云笈（Cloud Satchel）· Tauri 2 应用
 //!
 //! 前端：React + TS + CSS（ui/ 目录，Vite 构建）
 //! 后端：本模块 —— Win32 桌面图标控制 + 全局双击检测
@@ -100,7 +100,7 @@ fn is_already_running() -> bool {
         let handle = CreateMutexW(
             std::ptr::null(),
             0,
-            windows_sys::core::w!("AsYouWishToolBox_SingleInstance_v1"),
+            windows_sys::core::w!("CloudSatchel_SingleInstance_v1"),
         );
         if handle.is_null() {
             return false;
@@ -117,7 +117,7 @@ fn activate_existing_window() {
         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
     unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), windows_sys::core::w!("如意工具箱"));
+        let hwnd = FindWindowW(std::ptr::null(), windows_sys::core::w!("云笈"));
         if !hwnd.is_null() {
             ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
@@ -340,7 +340,7 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    dlog::write("[APP] AsYouWishToolBox start");
+    dlog::write("[APP] CloudSatchel start");
     if is_already_running() {
         activate_existing_window();
         return;

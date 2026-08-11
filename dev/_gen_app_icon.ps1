@@ -182,7 +182,7 @@ Save-Png 256 (Join-Path $iconsDir '128x128@2x.png')
 $sizes = 16, 24, 32, 48, 64, 128, 256
 $pngs = @()
 foreach ($s in $sizes) {
-    $p = Join-Path $env:TEMP "AsYouWishToolBox_icon_${s}.png"
+    $p = Join-Path $env:TEMP "CloudSatchel_icon_${s}.png"
     Save-Png $s $p
     $pngs += , @{ Size = $s; Bytes = [System.IO.File]::ReadAllBytes($p) }
 }
@@ -208,7 +208,7 @@ foreach ($e in $pngs) {
 [System.IO.File]::WriteAllBytes((Join-Path $iconsDir 'icon.ico'), $buf.ToArray())
 
 foreach ($s in $sizes) {
-    Remove-Item -LiteralPath (Join-Path $env:TEMP "AsYouWishToolBox_icon_${s}.png") -Force
+    Remove-Item -LiteralPath (Join-Path $env:TEMP "CloudSatchel_icon_${s}.png") -Force
 }
 
 Write-Output "app icon generated in $iconsDir"

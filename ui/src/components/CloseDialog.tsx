@@ -27,7 +27,7 @@ export function CloseDialog({ onCancel, onMinimizeToTray, onQuit }: CloseDialogP
         className="dialog-card noise-bg animate-scale-in"
         role="dialog"
         aria-modal="true"
-        aria-label="关闭如意工具箱"
+        aria-label="关闭云笈"
       >
         <div className="dialog-hero">
           <div className="dialog-icon">
@@ -48,7 +48,7 @@ export function CloseDialog({ onCancel, onMinimizeToTray, onQuit }: CloseDialogP
             </svg>
           </div>
           <div>
-            <h2 className="dialog-title">关闭如意工具箱？</h2>
+            <h2 className="dialog-title">关闭云笈？</h2>
             <p className="dialog-subtitle">最小化到托盘后，软件继续在后台运行</p>
           </div>
         </div>
