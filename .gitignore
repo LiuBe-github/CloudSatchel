@@ -11,22 +11,3 @@ __pycache__/
 # 日志与临时文件
 *.log
 _test_local.html
-
-# 历史遗留：Python/Tkinter 旧版源码与旧截图（保留在本地，不入库）
-app.py
-main.py
-webmain.py
-core/
-_archive/
-shot_*.png
-
-# 依赖旧版 Python 模块的开发脚本
-dev/_e2e_test.py
-dev/_full_test.py
-dev/_regression_bug.py
-dev/_selftest.py
-dev/_smoke.py
-dev/_smoke_tauri.py
-dev/_ui_check.py
-dev/_ui_test.py
-dev/_web_e2e.py
