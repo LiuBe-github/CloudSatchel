@@ -7,16 +7,20 @@ import {
   setTaskbarTransparent,
   setAutostart,
   setCloseToTray,
+  setBackground,
+  chooseBackgroundImage,
+  copyBackgroundImage,
   close,
   minimize,
   toggleMaximize,
   onStateUpdate,
 } from "./lib/bridge";
 import { changeTheme, watchSystemTheme, useThemeInit } from "./lib/theme";
-import type { AppState, ThemeMode } from "./vite-env";
+import type { AppState, BackgroundSettings, ThemeMode } from "./vite-env";
 import { Switch } from "./components/Switch";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { AboutPanel } from "./components/AboutPanel";
+import { BackgroundLayer } from "./components/BackgroundLayer";
 import { Toast, type ToastHandle } from "./components/Toast";
 import appIcon from "./assets/app-icon.png";
 
@@ -38,6 +42,18 @@ const FEATURES = [
   },
 ];
 
+function backgroundOf(state: AppState): BackgroundSettings {
+  return {
+    imagePath: state.backgroundImagePath,
+    fit: state.backgroundFit,
+    dim: state.backgroundDim,
+    blur: state.backgroundBlur,
+    scale: state.backgroundScale,
+    positionX: state.backgroundPositionX,
+    positionY: state.backgroundPositionY,
+  };
+}
+
 interface AppProps {
   initial?: AppState;
 }
@@ -53,12 +69,22 @@ function App({ initial }: AppProps) {
       animating: false,
       autostart: false,
       closeToTray: true,
+      backgroundImagePath: "",
+      backgroundFit: "cover",
+      backgroundDim: 0.25,
+      backgroundBlur: 0,
+      backgroundScale: 1,
+      backgroundPositionX: 50,
+      backgroundPositionY: 50,
     },
   );
   const [sidePanel, setSidePanel] = useState<"settings" | "about" | null>(null);
   const [activeId, setActiveId] = useState(FEATURES[0].id);
   const [busyToggle, setBusyToggle] = useState(false);
   const [maximized, setMaximized] = useState(false);
+  const [backgroundName, setBackgroundName] = useState(
+    () => localStorage.getItem("backgroundImageName") ?? "",
+  );
   const toastRef = useRef<ToastHandle>(null);
 
   // 首次进入：读取后端状态
@@ -152,6 +178,46 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
+  const handleBackgroundChange = useCallback(async (next: BackgroundSettings) => {
+    try {
+      const s = await setBackground(next);
+      setState(s);
+    } catch (err) {
+      console.error("更新背景图片设置失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleChooseBackground = useCallback(async () => {
+    try {
+      const path = await chooseBackgroundImage();
+      if (!path) return;
+      const name = path.split(/[\\/]/).pop() ?? "";
+      const saved = await copyBackgroundImage(path);
+      localStorage.setItem("backgroundImageName", name);
+      setBackgroundName(name);
+      const s = await setBackground({ ...backgroundOf(state), imagePath: saved });
+      setState(s);
+      toastRef.current?.show("背景图片已更新");
+    } catch (err) {
+      console.error("选择背景图片失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, [state]);
+
+  const handleClearBackground = useCallback(async () => {
+    try {
+      localStorage.removeItem("backgroundImageName");
+      setBackgroundName("");
+      const s = await setBackground({ ...backgroundOf(state), imagePath: "" });
+      setState(s);
+      toastRef.current?.show("已恢复默认背景");
+    } catch (err) {
+      console.error("清除背景图片失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, [state]);
+
   // 侧边面板（花笺 Floral 式）：设置 / 关于 共用主内容区右侧推开面板
   const openSettings = useCallback(() => setSidePanel("settings"), []);
   const openAbout = useCallback(() => setSidePanel("about"), []);
@@ -170,6 +236,7 @@ function App({ initial }: AppProps) {
 
   return (
     <div className={`app-shell${maximized ? " maximized" : ""}`}>
+      <BackgroundLayer state={state} />
       {/* 标题栏（data-tauri-drag-region 实现无边框拖拽） */}
       <header className="titlebar" data-tauri-drag-region>
         <div className="titlebar-title" data-tauri-drag-region>
@@ -237,7 +304,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.6.7</div>
+          <div className="sidebar-version">v0.7.0</div>
           </div>
         </aside>
 
@@ -284,6 +351,11 @@ function App({ initial }: AppProps) {
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
+          background={backgroundOf(state)}
+          backgroundName={backgroundName}
+          onBackgroundChange={handleBackgroundChange}
+          onChooseBackground={handleChooseBackground}
+          onClearBackground={handleClearBackground}
           onClose={closeSidePanel}
         />
         <AboutPanel open={sidePanel === "about"} onClose={closeSidePanel} />

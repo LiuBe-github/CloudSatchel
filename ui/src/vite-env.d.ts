@@ -2,6 +2,18 @@
 
 export type ThemeMode = "light" | "dark" | "system";
 
+export type BackgroundFit = "cover" | "contain" | "repeat";
+
+export interface BackgroundSettings {
+  imagePath: string;
+  fit: BackgroundFit;
+  dim: number;
+  blur: number;
+  scale: number;
+  positionX: number;
+  positionY: number;
+}
+
 export interface AppState {
   enabled: boolean; // 功能是否激活
   iconsHidden: boolean; // 图标当前是否隐藏
@@ -10,4 +22,11 @@ export interface AppState {
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
   closeToTray: boolean; // 关闭到托盘：true=关闭最小化到托盘；false=关闭直接退出
+  backgroundImagePath: string;
+  backgroundFit: BackgroundFit;
+  backgroundDim: number;
+  backgroundBlur: number;
+  backgroundScale: number;
+  backgroundPositionX: number;
+  backgroundPositionY: number;
 }

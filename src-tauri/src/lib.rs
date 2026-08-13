@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod background;
 mod dlog;
 mod hooks;
 mod icons;
@@ -35,6 +36,7 @@ struct AppState {
     theme: Mutex<String>,        // light / dark / system
     autostart: Mutex<bool>,      // 开机自启动（启动文件夹快捷方式）
     close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
+    background: Mutex<background::BackgroundSettings>, // 背景图片设置
 }
 
 impl Default for AppState {
@@ -48,6 +50,7 @@ impl Default for AppState {
             theme: Mutex::new("system".to_string()),
             autostart: Mutex::new(false),
             close_to_tray: Mutex::new(true),
+            background: Mutex::new(background::BackgroundSettings::default()),
         }
     }
 }
@@ -62,9 +65,17 @@ struct Snapshot {
     animating: bool,
     autostart: bool,
     close_to_tray: bool,
+    background_image_path: String,
+    background_fit: String,
+    background_dim: f64,
+    background_blur: f64,
+    background_scale: f64,
+    background_position_x: f64,
+    background_position_y: f64,
 }
 
 fn snapshot(state: &AppState) -> Snapshot {
+    let bg = state.background.lock().unwrap();
     Snapshot {
         enabled: *state.enabled.lock().unwrap(),
         icons_hidden: *state.icons_hidden.lock().unwrap(),
@@ -73,6 +84,13 @@ fn snapshot(state: &AppState) -> Snapshot {
         animating: *state.animating.lock().unwrap(),
         autostart: *state.autostart.lock().unwrap(),
         close_to_tray: *state.close_to_tray.lock().unwrap(),
+        background_image_path: bg.image_path.clone(),
+        background_fit: bg.fit.clone(),
+        background_dim: bg.dim,
+        background_blur: bg.blur,
+        background_scale: bg.scale,
+        background_position_x: bg.position_x,
+        background_position_y: bg.position_y,
     }
 }
 
@@ -241,6 +259,39 @@ fn set_close_to_tray(
 }
 
 #[tauri::command]
+fn set_background(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    settings: background::BackgroundSettings,
+) -> Snapshot {
+    let settings = settings.clamped();
+    *state.background.lock().unwrap() = settings.clone();
+    let _ = background::save(&settings);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+async fn choose_background_image() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(background::choose_background_image)
+        .await
+        .unwrap_or_else(|e| Err(format!("选择背景图片失败: {e}")))
+}
+
+#[tauri::command]
+fn copy_background_image(source_path: String) -> Result<String, String> {
+    background::copy_background_image(&source_path)
+}
+
+#[tauri::command]
+async fn read_background_image(path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || background::read_background_image(&path))
+        .await
+        .unwrap_or_else(|e| Err(format!("读取背景图片失败: {e}")))
+}
+
+#[tauri::command]
 fn minimize_window(window: tauri::Window) {
     let _ = window.minimize();
 }
@@ -365,6 +416,8 @@ pub fn run() {
     let state = std::sync::Arc::new(AppState::default());
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
+    // 加载持久化的背景图片设置
+    *state.background.lock().unwrap() = background::load();
 
     // 启动自修复：上次异常退出可能残留透明图标
     icons::ensure_icons_restored();
@@ -380,6 +433,10 @@ pub fn run() {
             set_taskbar_transparent,
             set_autostart,
             set_close_to_tray,
+            set_background,
+            choose_background_image,
+            copy_background_image,
+            read_background_image,
             minimize_window,
             toggle_maximize_window,
             close_window,

@@ -23,7 +23,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SMTO_ABORTIFHUNG, WS_EX_LAYERED,
 };
 
-const WM_SPAWN_WORKERW: u32 = 0x052C; // 通知 Progman 创建承载桌面的 WorkerW
 const LVM_FIRST: u32 = 0x1000;
 const LVM_GETNEXTITEM: u32 = LVM_FIRST + 12; // 按状态找下一项（选中项）
 const LVNI_SELECTED: u32 = 0x0002;
@@ -74,26 +73,15 @@ pub fn find_shell_view() -> HWND {
         }
 
         let progman = FindWindowW(windows_sys::core::w!("Progman"), std::ptr::null());
-        let mut found: HWND;
 
-        // 让 Progman 按需创建承载桌面壁纸的 WorkerW
-        if !progman.is_null() {
-            let mut dummy: usize = 0;
-            SendMessageTimeoutW(
-                progman,
-                WM_SPAWN_WORKERW,
-                0,
-                0,
-                0,
-                1000,
-                &mut dummy,
-            );
-        }
-
-        // 枚举顶层窗口，在 WorkerW 下找 SHELLDLL_DefView
+        // 直接枚举顶层窗口，在已有的 WorkerW / Progman 下找 SHELLDLL_DefView。
+        // 刻意不向 Progman 发 WM_SPAWN_WORKERW：该消息会让 Explorer 重建承载壁纸的
+        // WorkerW 窗口，Wallpaper Engine 等动态壁纸的渲染表面随之销毁重建，
+        // 表现为“壁纸暂停刷新一段时间后再恢复”。WorkerW 在正常桌面上本就存在，
+        // 直接枚举即可定位，无需也不应重建它。
         FOUND_SHELL_VIEW.store(0, Ordering::SeqCst);
         EnumWindows(Some(enum_shell_view_proc), 0);
-        found = FOUND_SHELL_VIEW.load(Ordering::SeqCst) as HWND;
+        let mut found = FOUND_SHELL_VIEW.load(Ordering::SeqCst) as HWND;
 
         // 兜底：直接查 Progman 子窗口
         if found.is_null() && !progman.is_null() {
@@ -240,7 +228,7 @@ fn desktop_list_views() -> Vec<HWND> {
         .map(|h| *h as HWND)
         .collect();
     if result.is_empty() {
-        // 兜底：主桌面列表（find_shell_view 走 WM_SPAWN_WORKERW 的稳妥路径）
+        // 兜底：主桌面列表
         let primary = find_desktop_list_view();
         if !primary.is_null() {
             result.push(primary);
