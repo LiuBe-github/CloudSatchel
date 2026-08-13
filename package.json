@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "npm --prefix ui run build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "npm run tauri build && powershell -NoProfile -ExecutionPolicy Bypass -File dev/_rename_installer.ps1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
