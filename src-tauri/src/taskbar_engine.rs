@@ -11,6 +11,12 @@
 //! - hide_tray=true（隐藏托盘图标）
 //! - disable_saving=true（引擎不写自己的设置）
 //!
+//! 引擎为原生 x64 程序，依赖 VC++ 2015-2022 运行库（MSVCP140 / MSVCP140_ATOMIC_WAIT /
+//! VCRUNTIME140 / VCRUNTIME140_1）。为避免目标机器缺运行库导致透明失效，这 4 个
+//! 运行库 DLL（来自微软官方 redist，x64）一并内嵌并释放到引擎目录，引擎进程按
+//! "应用本地部署"（app-local deployment）从自身目录加载，不修改系统、无需手动安装。
+//! UCRT（api-ms-win-crt-* / api-ms-win-core-*）是 Windows 10/11 系统自带，无需携带。
+//!
 //! 关闭功能/退出应用时结束引擎进程；启动自检兜底清理异常退出遗留的引擎实例。
 //! 引擎文件保留在 `%LOCALAPPDATA%\CloudSatchel\taskbar-engine`（不随关闭删除）：
 //! 删除后重新释放会让文件时间戳变新，TranslucentTB 复制 TAP 到临时目录时
@@ -77,6 +83,23 @@ const ENGINE_FILES: &[(&str, &[u8])] = &[
     (
         "README.txt",
         include_bytes!("../resources/taskbar-engine/README.txt"),
+    ),
+    // VC++ 2015-2022 x64 运行库（微软 redist 组件，供引擎进程本地加载）
+    (
+        "MSVCP140.dll",
+        include_bytes!("../resources/taskbar-engine/MSVCP140.dll"),
+    ),
+    (
+        "MSVCP140_ATOMIC_WAIT.dll",
+        include_bytes!("../resources/taskbar-engine/MSVCP140_ATOMIC_WAIT.dll"),
+    ),
+    (
+        "VCRUNTIME140.dll",
+        include_bytes!("../resources/taskbar-engine/VCRUNTIME140.dll"),
+    ),
+    (
+        "VCRUNTIME140_1.dll",
+        include_bytes!("../resources/taskbar-engine/VCRUNTIME140_1.dll"),
     ),
 ];
 
