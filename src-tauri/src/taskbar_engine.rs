@@ -23,6 +23,7 @@
 //! 会因目标被 explorer 锁定而失败，误弹“已更新，请重启 Windows”对话框。
 
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
@@ -206,6 +207,7 @@ fn terminate_pid(pid: u32) {
     let _ = Command::new("taskkill")
         .arg("/PID")
         .arg(pid.to_string())
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW：禁止弹出控制台窗口
         .spawn();
     wait_exit(pid, 1500);
     if is_process_alive(pid) {
@@ -213,6 +215,7 @@ fn terminate_pid(pid: u32) {
             .arg("/PID")
             .arg(pid.to_string())
             .arg("/F")
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW：禁止弹出控制台窗口
             .status();
         wait_exit(pid, 1000);
     }

@@ -12,6 +12,7 @@
 mod autostart;
 mod background;
 mod dlog;
+mod fullscreen;
 mod hooks;
 mod icons;
 mod taskbar;
@@ -33,6 +34,8 @@ struct AppState {
     animating: Mutex<bool>,      // 是否正在动画
     pending_toggle: Mutex<bool>, // 动画期间到达的切换请求（动画结束后立即执行，保证每次双击都不被吞）
     taskbar_transparent: Mutex<bool>, // 任务栏是否透明
+    fullscreen_active: Mutex<bool>, // 当前前台是否有应用处于全屏（用于暂时取消任务栏透明）
+    taskbar_applied: Mutex<bool>, // 任务栏“实际”当前是否已透明（用户意图与全屏叠加后的结果）
     theme: Mutex<String>,        // light / dark / system
     autostart: Mutex<bool>,      // 开机自启动（启动文件夹快捷方式）
     close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
@@ -47,6 +50,8 @@ impl Default for AppState {
             animating: Mutex::new(false),
             pending_toggle: Mutex::new(false),
             taskbar_transparent: Mutex::new(false),
+            fullscreen_active: Mutex::new(false),
+            taskbar_applied: Mutex::new(false),
             theme: Mutex::new("system".to_string()),
             autostart: Mutex::new(false),
             close_to_tray: Mutex::new(true),
@@ -94,12 +99,57 @@ fn snapshot(state: &AppState) -> Snapshot {
     }
 }
 
+/// 串行化任务栏视觉切换：用户开关与全屏切换可能同时触发，避免 stop/start 竞态
+static TASKBAR_LOCK: Mutex<()> = Mutex::new(());
+
+/// 任务栏“应当”呈现的视觉状态 = 用户开启透明 && 当前无全屏应用
+fn desired_taskbar_visual(state: &std::sync::Arc<AppState>) -> bool {
+    *state.taskbar_transparent.lock().unwrap() && !*state.fullscreen_active.lock().unwrap()
+}
+
+/// 把任务栏同步到目标视觉状态（幂等，异步执行避免阻塞主线程）
+///
+/// 全屏检测到变化、用户切换任务栏开关时都会调用这里。真正的引擎启停可能耗时
+/// 数百毫秒到数秒（Win11 走 TranslucentTB），因此放到 spawn_blocking 后台执行；
+/// 内部再用 TASKBAR_LOCK 串行化，防止多次调用交错。
+fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
+    let desired = desired_taskbar_visual(state);
+    let applied = *state.taskbar_applied.lock().unwrap();
+    if desired == applied {
+        return;
+    }
+
+    let app2 = app.clone();
+    let state2 = state.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = TASKBAR_LOCK.lock().unwrap();
+
+        // 排队期间状态可能又变了：以“最新意图”为准，幂等跳过
+        let desired_now = desired_taskbar_visual(&state2);
+        let applied_now = *state2.taskbar_applied.lock().unwrap();
+        if desired_now == applied_now {
+            return;
+        }
+
+        let ok = taskbar::set_transparent(desired_now);
+        {
+            let mut applied = state2.taskbar_applied.lock().unwrap();
+            *applied = if ok { desired_now } else { false };
+        }
+        if !ok && desired_now {
+            // 开启透明失败（例如引擎启动失败）：回滚用户开关，让前端状态与真实一致
+            *state2.taskbar_transparent.lock().unwrap() = false;
+        }
+        let _ = app2.emit("state-updated", snapshot(&state2));
+    });
+}
+
 /// 退出前的统一清理：停止全局钩子、恢复桌面图标、恢复任务栏
 fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
-    if *state.taskbar_transparent.lock().unwrap() {
+    if *state.taskbar_transparent.lock().unwrap() || *state.taskbar_applied.lock().unwrap() {
         taskbar::restore();
     }
 }
@@ -199,38 +249,23 @@ fn set_theme(app: AppHandle, state: State<std::sync::Arc<AppState>>, mode: Strin
 }
 
 #[tauri::command]
-async fn set_taskbar_transparent(
+fn set_taskbar_transparent(
     app: AppHandle,
-    state: State<'_, std::sync::Arc<AppState>>,
+    state: State<std::sync::Arc<AppState>>,
     enabled: bool,
-) -> Result<Snapshot, String> {
+) -> Snapshot {
     let state = state.inner().clone();
     let current = *state.taskbar_transparent.lock().unwrap();
     if current == enabled {
-        return Ok(snapshot(&state));
+        return snapshot(&state);
     }
-    // 先翻转状态并推送前端，让开关即时响应；
-    // 引擎的启停（可能耗时数百毫秒到数秒）放到后台线程执行，
-    // 避免阻塞主线程导致窗口“无响应”。
+    // 先记录用户意图并推送前端，让开关即时响应；
+    // 实际的任务栏切换（含全屏叠加逻辑）交给 sync_taskbar 异步执行。
     *state.taskbar_transparent.lock().unwrap() = enabled;
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
-
-    let ok = tauri::async_runtime::spawn_blocking(move || taskbar::set_transparent(enabled))
-        .await
-        .unwrap_or(false);
-
-    if !ok {
-        // 引擎启动失败：回滚状态（仅当用户没有再次切换时）
-        let mut cur = state.taskbar_transparent.lock().unwrap();
-        if *cur == enabled {
-            *cur = false;
-        }
-        drop(cur);
-        let snap = snapshot(&state);
-        let _ = app.emit("state-updated", snap.clone());
-    }
-    Ok(snapshot(&state))
+    sync_taskbar(&app, &state);
+    snap
 }
 
 #[tauri::command]
@@ -392,11 +427,36 @@ fn start_toggle(app: &AppHandle, state: &std::sync::Arc<AppState>) {
 
 /// 轮询桌面双击事件（后台线程）
 fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
+    let mut tick: u64 = 0;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(80));
         if icons::take_hook_event() {
             dlog::write("[poll_loop] take_hook_event=true -> start_toggle");
             start_toggle(&app, &state);
+        }
+
+        tick += 1;
+        // 每约 320ms（4 个 80ms 周期）检查一次前台窗口是否全屏
+        if tick % 4 == 0 {
+            let own = fullscreen::find_own_window();
+            let fg = fullscreen::foreground_hwnd();
+            // 云笈自身前台且最大化 → 按用户的理解视为“全屏”；
+            // 否则按“前台第三方窗口覆盖整个显示器”判断真全屏。
+            let fullscreen = if fg != 0 && fg == own {
+                fullscreen::is_zoomed(fg)
+            } else {
+                fullscreen::is_fullscreen_now()
+            };
+            let mut cur = state.fullscreen_active.lock().unwrap();
+            if *cur != fullscreen {
+                *cur = fullscreen;
+                drop(cur);
+                dlog::write(&format!(
+                    "[poll_loop] fullscreen changed -> {}",
+                    fullscreen
+                ));
+                sync_taskbar(&app, &state);
+            }
         }
     }
 }
