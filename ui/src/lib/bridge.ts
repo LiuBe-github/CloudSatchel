@@ -1,7 +1,7 @@
 // 与 Tauri 后端（Rust command）通信的桥接层
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppState, BackgroundSettings, ThemeMode } from "../vite-env";
+import type { AppState, BackgroundSettings, PerfSnapshot, ThemeMode } from "../vite-env";
 
 /** 应用是否运行在 Tauri 内（否则为浏览器预览模式） */
 export const inTauri = (): boolean =>
@@ -11,6 +11,7 @@ const FALLBACK_STATE: AppState = {
   enabled: true,
   iconsHidden: false,
   taskbarTransparent: false,
+  performanceMonitor: false,
   theme: "system",
   animating: false,
   autostart: false,
@@ -42,6 +43,16 @@ export async function setEnabled(enabled: boolean): Promise<AppState> {
 export async function setTaskbarTransparent(enabled: boolean): Promise<AppState> {
   if (!inTauri()) return fallback({ taskbarTransparent: enabled });
   return (await invoke<AppState>("set_taskbar_transparent", { enabled })) as AppState;
+}
+
+export async function setPerformanceMonitor(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ performanceMonitor: enabled });
+  return (await invoke<AppState>("set_performance_monitor", { enabled })) as AppState;
+}
+
+export async function getPerfSnapshot(): Promise<PerfSnapshot | null> {
+  if (!inTauri()) return null;
+  return (await invoke<PerfSnapshot | null>("get_perf_snapshot")) ?? null;
 }
 
 export async function setTheme(mode: ThemeMode): Promise<AppState> {

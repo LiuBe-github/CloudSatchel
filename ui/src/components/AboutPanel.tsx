@@ -6,7 +6,7 @@ interface AboutPanelProps {
   onClose: () => void;
 }
 
-const APP_VERSION = "v0.7.1";
+const APP_VERSION = "v0.8.0";
 
 /** 关于面板：显示软件基本信息（花笺 Floral 式侧边面板） */
 export function AboutPanel({ open, onClose }: AboutPanelProps) {
@@ -42,7 +42,7 @@ export function AboutPanel({ open, onClose }: AboutPanelProps) {
         <div className="settings-section">
           <div className="settings-label">简介</div>
           <p className="about-desc">
-            纯净本地 Windows 桌面工具集：双击隐藏桌面图标、透明任务栏。
+            纯净本地 Windows 桌面工具集：双击隐藏桌面图标、透明任务栏与主机性能监控。
             本地运行、不联网、不写注册表，退出即自动恢复。
           </p>
         </div>

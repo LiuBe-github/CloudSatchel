@@ -4,7 +4,7 @@
 （纸感配色 + 竹青绿强调色 + 噪声纹理 + 柔和动画），技术栈为
 **React 19 + TypeScript + CSS 前端 · Tauri 2 (Rust) 桌面壳 · Win32 API 原生控制**。
 
-当前包含两个工具：**双击隐藏桌面图标** 与 **透明任务栏**。
+当前包含三个工具：**双击隐藏桌面图标**、**透明任务栏** 与 **主机性能监控**。
 
 ## 功能特性
 
@@ -13,6 +13,7 @@
   - 精准判定：双击**图标本身**仍会正常打开应用，不会误触发隐藏
   - 每次物理双击 1:1 切换，动画期间到达的请求排队，绝不吞事件
 - ✅ 透明任务栏：Win10 走 Accent API，Win11 内置 TranslucentTB 便携引擎
+- ✅ 主机性能监控：CPU / GPU / 内存 / 网络实时曲线与关键明细（本地采样，约 1 秒刷新）
 - ✅ 无边框圆角窗口，标题栏可拖动，Windows 风格窗口按钮（右上角）
 - ✅ 关闭到托盘：设置开关可切换——开启后点击关闭最小化到托盘（后台继续运行，托盘图标随时恢复）；关闭后点击关闭直接退出
 - ✅ 关于面板：标题栏 ⓘ 查看软件名称、版本、技术栈与仓库信息
@@ -44,7 +45,7 @@ Windows 下直接双击 `build.bat` 可一键完成构建；双击 `launch.bat` 
 | 产物 | 位置 |
 | --- | --- |
 | 免安装便携版 EXE | `src-tauri\target\release\CloudSatchel.exe` |
-| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\CloudSatchel_0.7.1_x64-setup.exe` |
+| NSIS 安装包 | `src-tauri\target\release\bundle\nsis\CloudSatchel_0.8.0_x64-setup.exe` |
 
 生成安装包：在项目根目录执行 `npm run tauri build`（首次会下载 NSIS 工具链）。
 

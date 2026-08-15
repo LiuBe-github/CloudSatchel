@@ -337,12 +337,14 @@ button {
   flex-direction: column;
   padding: 24px 28px 18px;
   min-width: 0;
+  min-height: 0;
 }
 
 .detail-card {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 26px 28px;
   border-radius: var(--app-radius);
   background: color-mix(in srgb, var(--color-cloud) 70%, transparent);
@@ -442,6 +444,214 @@ button {
   color: var(--color-ink-faint);
   line-height: 1.7;
   border-top: 1px dashed var(--color-paper-deep);
+}
+
+/* ---------- 主机性能监控 ---------- */
+.perf-switch-row {
+  align-items: center;
+}
+
+.perf-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.perf-nav {
+  width: 112px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-paper-warm) 72%, transparent);
+  border: 1px solid var(--color-paper-deep);
+}
+
+.perf-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--color-ink-soft);
+  text-align: left;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+.perf-nav-item:hover {
+  background: var(--color-paper-deep);
+  color: var(--color-ink);
+}
+.perf-nav-item.active {
+  background: var(--color-bamboo);
+  color: #f6f3ec;
+  box-shadow: 0 2px 8px var(--color-shadow);
+}
+
+.perf-nav-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.perf-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.perf-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.perf-hero-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-ink-faint);
+}
+
+.perf-hero-value {
+  margin-top: 5px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-hero-caption {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+}
+
+.perf-chart-wrap {
+  height: 116px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-paper-warm) 68%, transparent);
+  border: 1px solid var(--color-paper-deep);
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.perf-chart {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.perf-chart-grid {
+  stroke: var(--color-paper-deep);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.perf-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+.perf-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.perf-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.perf-detail-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-faint) transparent;
+}
+.perf-detail-list::-webkit-scrollbar {
+  width: 7px;
+}
+.perf-detail-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.perf-detail-list::-webkit-scrollbar-thumb {
+  background: var(--color-ink-faint);
+  border-radius: 999px;
+}
+.perf-detail-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-ghost);
+}
+
+.perf-details {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.perf-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-paper-warm) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-paper-deep) 76%, transparent);
+}
+
+.perf-detail-label {
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+}
+
+.perf-detail-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.perf-detail-value.tone-good {
+  color: var(--color-bamboo);
+}
+.perf-detail-value.tone-warm {
+  color: #b8860b;
+}
+.perf-detail-value.tone-hot {
+  color: var(--color-danger);
+}
+
+.perf-empty {
+  flex: 1;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--color-ink-faint);
 }
 
 .detail-footer {

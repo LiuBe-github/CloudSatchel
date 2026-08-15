@@ -18,6 +18,7 @@ export interface AppState {
   enabled: boolean; // 功能是否激活
   iconsHidden: boolean; // 图标当前是否隐藏
   taskbarTransparent: boolean; // 任务栏是否透明
+  performanceMonitor: boolean; // 主机性能监控是否激活
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
@@ -29,4 +30,49 @@ export interface AppState {
   backgroundScale: number;
   backgroundPositionX: number;
   backgroundPositionY: number;
+}
+
+export interface CpuMetrics {
+  usage: number;
+  temperature: number | null;
+  currentFrequencyMhz: number | null;
+  baseFrequencyMhz: number | null;
+  coreCount: number | null;
+  logicalProcessorCount: number;
+  processCount: number;
+  threadCount: number;
+}
+
+export interface GpuMetrics {
+  name: string | null;
+  utilization: number | null;
+  temperature: number | null;
+  memoryUsedMb: number | null;
+  memoryTotalMb: number | null;
+  sharedMemoryUsedMb: number | null;
+  driverVersion: string | null;
+}
+
+export interface MemoryMetrics {
+  usage: number;
+  usedBytes: number;
+  availableBytes: number;
+  totalBytes: number;
+  pagefileUsedBytes: number | null;
+  pagefileTotalBytes: number | null;
+}
+
+export interface NetworkMetrics {
+  uploadBytesPerSec: number;
+  downloadBytesPerSec: number;
+  adapterName: string | null;
+  linkSpeedMbps: number | null;
+}
+
+export interface PerfSnapshot {
+  timestamp: number;
+  cpu: CpuMetrics;
+  gpu: GpuMetrics;
+  memory: MemoryMetrics;
+  network: NetworkMetrics;
 }

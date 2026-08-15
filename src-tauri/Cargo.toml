@@ -1,6 +1,6 @@
 [package]
 name = "cloud-satchel"
-version = "0.7.1"
+version = "0.8.0"
 description = "云笈 - 纯净本地 Windows 桌面工具"
 authors = ["LiuBe"]
 edition = "2021"
@@ -22,6 +22,8 @@ tauri = { version = "2", features = ["custom-protocol", "tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+sysinfo = "0.30"
+nvml-wrapper = "0.10"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -31,8 +33,11 @@ windows-sys = { version = "0.59", features = [
   "Win32_Security",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_LibraryLoader",
+  "Win32_System_Power",
   "Win32_System_Registry",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
+  "Win32_NetworkManagement_IpHelper",
 ] }
 # 完整 COM 接口（IShellLinkW / IPersistFile），用于创建启动文件夹快捷方式
 windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com"] }

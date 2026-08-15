@@ -5,6 +5,7 @@ import {
   getState,
   setEnabled,
   setTaskbarTransparent,
+  setPerformanceMonitor,
   setAutostart,
   setCloseToTray,
   setBackground,
@@ -21,6 +22,7 @@ import { Switch } from "./components/Switch";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { AboutPanel } from "./components/AboutPanel";
 import { BackgroundLayer } from "./components/BackgroundLayer";
+import { PerformancePanel } from "./components/PerformancePanel";
 import { Toast, type ToastHandle } from "./components/Toast";
 import appIcon from "./assets/app-icon.png";
 
@@ -39,6 +41,14 @@ const FEATURES = [
     subtitle: "让任务栏背景消失，只保留任务按钮",
     detail:
       "开启后任务栏背景消失，只保留任务按钮，与壁纸融为一体（约 1~2 秒生效）；关闭后恢复系统默认外观。",
+  },
+  {
+    id: "performance-monitor",
+    icon: "▥",
+    title: "主机性能监控",
+    subtitle: "实时查看 CPU、GPU、内存与网络状态",
+    detail:
+      "开启后以约 1 秒间隔在本机采集关键性能指标，参照 Windows 任务管理器性能页展示实时曲线与明细。关闭后立即停止采集。",
   },
 ];
 
@@ -65,6 +75,7 @@ function App({ initial }: AppProps) {
       enabled: true,
       iconsHidden: false,
       taskbarTransparent: false,
+      performanceMonitor: false,
       theme: "system",
       animating: false,
       autostart: false,
@@ -129,12 +140,17 @@ function App({ initial }: AppProps) {
     setBusyToggle(true);
     try {
       const isTaskbar = activeId === FEATURES[1].id;
+      const isPerformance = activeId === FEATURES[2].id;
       const next = isTaskbar
         ? await setTaskbarTransparent(!state.taskbarTransparent)
-        : await setEnabled(!state.enabled);
+        : isPerformance
+          ? await setPerformanceMonitor(!state.performanceMonitor)
+          : await setEnabled(!state.enabled);
       setState(next);
       if (isTaskbar) {
         toastRef.current?.show(next.taskbarTransparent ? "任务栏已透明化" : "已恢复系统默认任务栏");
+      } else if (isPerformance) {
+        toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
       } else if (next.enabled) {
         toastRef.current?.show("功能已激活，现在可以双击桌面空白处切换图标");
       } else {
@@ -146,7 +162,7 @@ function App({ initial }: AppProps) {
     } finally {
       setBusyToggle(false);
     }
-  }, [busyToggle, state.enabled, state.taskbarTransparent, activeId]);
+  }, [busyToggle, state.enabled, state.taskbarTransparent, state.performanceMonitor, activeId]);
 
   const handleTheme = useCallback(
     async (mode: ThemeMode) => {
@@ -225,11 +241,20 @@ function App({ initial }: AppProps) {
 
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
-  const featureOn = isTaskbar ? state.taskbarTransparent : state.enabled;
+  const isPerformance = activeId === FEATURES[2].id;
+  const featureOn = isTaskbar
+    ? state.taskbarTransparent
+    : isPerformance
+      ? state.performanceMonitor
+      : state.enabled;
   const stateHint = isTaskbar
     ? state.taskbarTransparent
       ? "任务栏 · 当前已透明"
       : "任务栏 · 当前为系统默认"
+    : isPerformance
+      ? state.performanceMonitor
+        ? "性能监控 · 当前已开启"
+        : "性能监控 · 当前已关闭"
     : state.iconsHidden
       ? "桌面图标 · 当前已隐藏"
       : "桌面图标 · 当前已显示";
@@ -304,42 +329,54 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.7.1</div>
+          <div className="sidebar-version">v0.8.0</div>
           </div>
         </aside>
 
         <section className="detail-pane">
-          <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
-            <div className="detail-hero">
-              <div className="detail-icon">{feature.icon}</div>
-              <div className="detail-titles">
-                <h1 className="detail-title">{feature.title}</h1>
-                <p className="detail-subtitle">{feature.subtitle}</p>
-              </div>
-            </div>
-
-            <div className="detail-rule" />
-
-            <div className="detail-row">
-              <div className="detail-state">
-                <span
-                  className={`state-dot ${featureOn ? "on" : "off"}`}
-                  style={{ background: state.animating ? "var(--color-bamboo-light)" : undefined }}
-                />
-                <div>
-                  <div className="state-label">{featureOn ? "功能已激活" : "功能已停用"}</div>
-                  <div className="state-hint">{stateHint}</div>
+          {isPerformance ? (
+            <PerformancePanel
+              enabled={state.performanceMonitor}
+              busy={busyToggle}
+              onChange={handleToggle}
+            />
+          ) : (
+            <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
+              <div className="detail-hero">
+                <div className="detail-icon">{feature.icon}</div>
+                <div className="detail-titles">
+                  <h1 className="detail-title">{feature.title}</h1>
+                  <p className="detail-subtitle">{feature.subtitle}</p>
                 </div>
               </div>
-              <Switch checked={featureOn} onChange={handleToggle} disabled={busyToggle} />
-            </div>
 
-            <p className="detail-note">{feature.detail}</p>
-          </div>
+              <div className="detail-rule" />
+
+              <div className="detail-row">
+                <div className="detail-state">
+                  <span
+                    className={`state-dot ${featureOn ? "on" : "off"}`}
+                    style={{ background: state.animating ? "var(--color-bamboo-light)" : undefined }}
+                  />
+                  <div>
+                    <div className="state-label">{featureOn ? "功能已激活" : "功能已停用"}</div>
+                    <div className="state-hint">{stateHint}</div>
+                  </div>
+                </div>
+                <Switch checked={featureOn} onChange={handleToggle} disabled={busyToggle} />
+              </div>
+
+              <p className="detail-note">{feature.detail}</p>
+            </div>
+          )}
 
           <div className="detail-footer">
             <span className="hint-icon">␣</span>
-            {isTaskbar ? "任务栏背景消失 · 退出应用自动恢复" : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
+            {isTaskbar
+              ? "任务栏背景消失 · 退出应用自动恢复"
+              : isPerformance
+                ? "仅本机采集 · 不联网 · 关闭后立即停止采样"
+                : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
 

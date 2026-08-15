@@ -15,6 +15,7 @@ mod dlog;
 mod fullscreen;
 mod hooks;
 mod icons;
+mod perf;
 mod taskbar;
 mod taskbar_engine;
 mod tray;
@@ -40,6 +41,7 @@ struct AppState {
     autostart: Mutex<bool>,      // 开机自启动（启动文件夹快捷方式）
     close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
     background: Mutex<background::BackgroundSettings>, // 背景图片设置
+    performance_monitor: Mutex<bool>, // 主机性能监控是否激活
 }
 
 impl Default for AppState {
@@ -56,6 +58,7 @@ impl Default for AppState {
             autostart: Mutex::new(false),
             close_to_tray: Mutex::new(true),
             background: Mutex::new(background::BackgroundSettings::default()),
+            performance_monitor: Mutex::new(false),
         }
     }
 }
@@ -70,6 +73,7 @@ struct Snapshot {
     animating: bool,
     autostart: bool,
     close_to_tray: bool,
+    performance_monitor: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -89,6 +93,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         animating: *state.animating.lock().unwrap(),
         autostart: *state.autostart.lock().unwrap(),
         close_to_tray: *state.close_to_tray.lock().unwrap(),
+        performance_monitor: *state.performance_monitor.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -147,6 +152,7 @@ fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
 /// 退出前的统一清理：停止全局钩子、恢复桌面图标、恢复任务栏
 fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
+    perf::stop();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
     if *state.taskbar_transparent.lock().unwrap() || *state.taskbar_applied.lock().unwrap() {
@@ -291,6 +297,35 @@ fn set_close_to_tray(
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     Ok(snap)
+}
+
+#[tauri::command]
+fn set_performance_monitor(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut current = state.performance_monitor.lock().unwrap();
+        if *current == enabled {
+            drop(current);
+            return snapshot(&state);
+        }
+        *current = enabled;
+    }
+    if enabled {
+        perf::start();
+    } else {
+        perf::stop();
+    }
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn get_perf_snapshot() -> Option<perf::PerfSnapshot> {
+    perf::latest()
 }
 
 #[tauri::command]
@@ -493,6 +528,8 @@ pub fn run() {
             set_taskbar_transparent,
             set_autostart,
             set_close_to_tray,
+            set_performance_monitor,
+            get_perf_snapshot,
             set_background,
             choose_background_image,
             copy_background_image,
