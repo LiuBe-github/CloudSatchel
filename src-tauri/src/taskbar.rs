@@ -12,13 +12,16 @@
 use std::mem::size_of;
 
 use windows_sys::core::{s, w};
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
     HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW};
+use windows_sys::Win32::UI::Shell::{
+    SHAppBarMessage, ABM_GETSTATE, ABM_SETSTATE, ABS_AUTOHIDE, APPBARDATA,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowW, GetClassNameW};
 
 const ACCENT_DISABLED: u32 = 0;
 const ACCENT_ENABLE_TRANSPARENTGRADIENT: u32 = 2;
@@ -220,6 +223,69 @@ pub fn set_transparent(enabled: bool) -> bool {
 /// 恢复系统默认任务栏（供关闭功能 / 退出时调用）
 pub fn restore() {
     let _ = set_transparent(false);
+}
+
+// ---------------------------------------------------------------------------
+// 任务栏自动隐藏（FR-14 / FR-13 步骤③ 共用）
+// ---------------------------------------------------------------------------
+
+fn taskbar_hwnd() -> HWND {
+    unsafe { FindWindowW(w!("Shell_TrayWnd"), std::ptr::null()) }
+}
+
+/// 查询任务栏当前是否处于自动隐藏状态（AppBar 运行时状态，含系统自身设置）
+pub fn is_autohide() -> bool {
+    let hwnd = taskbar_hwnd();
+    if hwnd.is_null() {
+        return false;
+    }
+    unsafe {
+        let mut abd = APPBARDATA {
+            cbSize: size_of::<APPBARDATA>() as u32,
+            hWnd: hwnd,
+            uCallbackMessage: 0,
+            uEdge: 0,
+            rc: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            lParam: 0,
+        };
+        SHAppBarMessage(ABM_GETSTATE, &mut abd) as u32 == ABS_AUTOHIDE
+    }
+}
+
+/// 设置任务栏自动隐藏（ABS_AUTOHIDE / 恢复为不自动隐藏）。
+///
+/// 仅改变运行时 AppBar 状态，不写注册表、不改系统「自动隐藏任务栏」设置开关；
+/// 隐藏后的边缘弹出 / 移开再隐藏由系统原生行为完成。
+pub fn set_autohide(enabled: bool) -> bool {
+    let hwnd = taskbar_hwnd();
+    if hwnd.is_null() {
+        return false;
+    }
+    unsafe {
+        let mut abd = APPBARDATA {
+            cbSize: size_of::<APPBARDATA>() as u32,
+            hWnd: hwnd,
+            uCallbackMessage: 0,
+            uEdge: 0,
+            rc: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            lParam: if enabled {
+                ABS_AUTOHIDE as isize
+            } else {
+                0 // ABS_NONE
+            },
+        };
+        SHAppBarMessage(ABM_SETSTATE, &mut abd) != 0
+    }
 }
 
 /// 启动自检：清理旧版注册表实验遗留，并结束异常退出残留的引擎进程

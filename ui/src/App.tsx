@@ -6,6 +6,10 @@ import {
   setEnabled,
   setTaskbarTransparent,
   setPerformanceMonitor,
+  setPrivacyEnabled,
+  setPrivacyIdleSecs,
+  setAutohideEnabled,
+  setAutohideIdleSecs,
   setAutostart,
   setCloseToTray,
   setBackground,
@@ -50,6 +54,14 @@ const FEATURES = [
     detail:
       "开启后以约 1 秒间隔在本机采集关键性能指标，参照 Windows 任务管理器性能页展示实时曲线与明细。关闭后立即停止采集。",
   },
+  {
+    id: "privacy",
+    icon: "◉",
+    title: "隐私操作",
+    subtitle: "空闲时自动保护屏幕，防止窥屏",
+    detail:
+      "开启后，电脑空闲超过设定时间（默认 60 秒），自动最小化所有窗口、隐藏桌面图标与任务栏并静音；您一操作鼠标或键盘，立即全部还原。",
+  },
 ];
 
 function backgroundOf(state: AppState): BackgroundSettings {
@@ -76,6 +88,11 @@ function App({ initial }: AppProps) {
       iconsHidden: false,
       taskbarTransparent: false,
       performanceMonitor: false,
+      privacyEnabled: false,
+      privacyIdleSecs: 60,
+      privacyActive: false,
+      autohideEnabled: false,
+      autohideIdleSecs: 60,
       theme: "system",
       animating: false,
       autostart: false,
@@ -141,16 +158,25 @@ function App({ initial }: AppProps) {
     try {
       const isTaskbar = activeId === FEATURES[1].id;
       const isPerformance = activeId === FEATURES[2].id;
+      const isPrivacy = activeId === FEATURES[3].id;
       const next = isTaskbar
         ? await setTaskbarTransparent(!state.taskbarTransparent)
         : isPerformance
           ? await setPerformanceMonitor(!state.performanceMonitor)
-          : await setEnabled(!state.enabled);
+          : isPrivacy
+            ? await setPrivacyEnabled(!state.privacyEnabled)
+            : await setEnabled(!state.enabled);
       setState(next);
       if (isTaskbar) {
         toastRef.current?.show(next.taskbarTransparent ? "任务栏已透明化" : "已恢复系统默认任务栏");
       } else if (isPerformance) {
         toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
+      } else if (isPrivacy) {
+        toastRef.current?.show(
+          next.privacyEnabled
+            ? "隐私操作已开启，空闲时将自动保护屏幕"
+            : "隐私操作已关闭",
+        );
       } else if (next.enabled) {
         toastRef.current?.show("功能已激活，现在可以双击桌面空白处切换图标");
       } else {
@@ -162,7 +188,7 @@ function App({ initial }: AppProps) {
     } finally {
       setBusyToggle(false);
     }
-  }, [busyToggle, state.enabled, state.taskbarTransparent, state.performanceMonitor, activeId]);
+  }, [busyToggle, state.enabled, state.taskbarTransparent, state.performanceMonitor, state.privacyEnabled, activeId]);
 
   const handleTheme = useCallback(
     async (mode: ThemeMode) => {
@@ -190,6 +216,48 @@ function App({ initial }: AppProps) {
       toastRef.current?.show(enabled ? "已开启：关闭窗口时最小化到托盘" : "已关闭：关闭窗口时直接退出");
     } catch (err) {
       console.error("切换关闭到托盘失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleTaskbarTransparent = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setTaskbarTransparent(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "任务栏已透明化" : "已恢复系统默认任务栏");
+    } catch (err) {
+      console.error("切换透明任务栏失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handlePrivacyIdle = useCallback(async (secs: number) => {
+    try {
+      const next = await setPrivacyIdleSecs(secs);
+      setState(next);
+    } catch (err) {
+      console.error("更新隐私操作空闲时间失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setAutohideEnabled(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "任务栏自动隐藏已开启" : "任务栏自动隐藏已关闭");
+    } catch (err) {
+      console.error("切换任务栏自动隐藏失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleAutohideIdle = useCallback(async (secs: number) => {
+    try {
+      const next = await setAutohideIdleSecs(secs);
+      setState(next);
+    } catch (err) {
+      console.error("更新任务栏自动隐藏空闲时间失败", err);
       toastRef.current?.show("操作失败，请稍后重试");
     }
   }, []);
@@ -242,11 +310,14 @@ function App({ initial }: AppProps) {
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
   const isPerformance = activeId === FEATURES[2].id;
+  const isPrivacy = activeId === FEATURES[3].id;
   const featureOn = isTaskbar
     ? state.taskbarTransparent
     : isPerformance
       ? state.performanceMonitor
-      : state.enabled;
+      : isPrivacy
+        ? state.privacyEnabled
+        : state.enabled;
   const stateHint = isTaskbar
     ? state.taskbarTransparent
       ? "任务栏 · 当前已透明"
@@ -255,9 +326,13 @@ function App({ initial }: AppProps) {
       ? state.performanceMonitor
         ? "性能监控 · 当前已开启"
         : "性能监控 · 当前已关闭"
-    : state.iconsHidden
-      ? "桌面图标 · 当前已隐藏"
-      : "桌面图标 · 当前已显示";
+      : isPrivacy
+        ? state.privacyActive
+          ? "隐私操作 · 已触发保护，操作鼠标或键盘后自动还原"
+          : "隐私操作 · 空闲超过设定时间自动触发"
+        : state.iconsHidden
+          ? "桌面图标 · 当前已隐藏"
+          : "桌面图标 · 当前已显示";
 
   return (
     <div className={`app-shell${maximized ? " maximized" : ""}`}>
@@ -329,7 +404,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.9.0</div>
+          <div className="sidebar-version">v0.10.0</div>
           </div>
         </aside>
 
@@ -376,7 +451,9 @@ function App({ initial }: AppProps) {
               ? "任务栏背景消失 · 退出应用自动恢复"
               : isPerformance
                 ? "仅本机采集 · 不联网 · 关闭后立即停止采样"
-                : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
+                : isPrivacy
+                  ? "空闲超时自动保护 · 操作鼠标或键盘立即还原 · 退出应用自动恢复"
+                  : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
 
@@ -388,6 +465,14 @@ function App({ initial }: AppProps) {
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
+          taskbarTransparent={state.taskbarTransparent}
+          onTaskbarTransparentChange={handleTaskbarTransparent}
+          autohideEnabled={state.autohideEnabled}
+          onAutohideChange={handleAutohideEnabled}
+          autohideIdleSecs={state.autohideIdleSecs}
+          onAutohideIdleChange={handleAutohideIdle}
+          privacyIdleSecs={state.privacyIdleSecs}
+          onPrivacyIdleChange={handlePrivacyIdle}
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

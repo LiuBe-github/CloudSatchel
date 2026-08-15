@@ -20,6 +20,9 @@ fn default_true() -> bool {
 fn default_theme() -> String {
     "system".to_string()
 }
+fn default_idle_secs() -> u32 {
+    60
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -50,6 +53,14 @@ pub struct AppPrefs {
     pub theme: String, // light / dark / system
     #[serde(default = "default_true")]
     pub close_to_tray: bool, // 关闭到托盘
+    #[serde(default)]
+    pub privacy_enabled: bool, // 隐私操作（FR-13）
+    #[serde(default = "default_idle_secs")]
+    pub privacy_idle_secs: u32, // 隐私操作空闲时间（秒）
+    #[serde(default)]
+    pub autohide_enabled: bool, // 任务栏自动隐藏（FR-14）
+    #[serde(default = "default_idle_secs")]
+    pub autohide_idle_secs: u32, // 任务栏自动隐藏空闲时间（秒）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -76,6 +87,10 @@ impl Default for AppPrefs {
             performance_monitor: false,
             theme: default_theme(),
             close_to_tray: true,
+            privacy_enabled: false,
+            privacy_idle_secs: default_idle_secs(),
+            autohide_enabled: false,
+            autohide_idle_secs: default_idle_secs(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

@@ -131,3 +131,15 @@ pub fn is_fullscreen_now() -> bool {
             && wr.bottom >= m.bottom - TOLERANCE_PX
     }
 }
+
+/// 有效全屏判断（供空闲类功能复用）：云笈自身前台且最大化 → 视为“全屏”；
+/// 否则按前台第三方窗口是否覆盖整个显示器判断（同主轮询逻辑）。
+pub fn is_fullscreen_effective() -> bool {
+    let own = find_own_window();
+    let fg = foreground_hwnd();
+    if fg != 0 && fg == own {
+        is_zoomed(fg)
+    } else {
+        is_fullscreen_now()
+    }
+}

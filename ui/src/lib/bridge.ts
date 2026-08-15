@@ -12,6 +12,11 @@ const FALLBACK_STATE: AppState = {
   iconsHidden: false,
   taskbarTransparent: false,
   performanceMonitor: false,
+  privacyEnabled: false,
+  privacyIdleSecs: 60,
+  privacyActive: false,
+  autohideEnabled: false,
+  autohideIdleSecs: 60,
   theme: "system",
   animating: false,
   autostart: false,
@@ -48,6 +53,26 @@ export async function setTaskbarTransparent(enabled: boolean): Promise<AppState>
 export async function setPerformanceMonitor(enabled: boolean): Promise<AppState> {
   if (!inTauri()) return fallback({ performanceMonitor: enabled });
   return (await invoke<AppState>("set_performance_monitor", { enabled })) as AppState;
+}
+
+export async function setPrivacyEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyEnabled: enabled });
+  return (await invoke<AppState>("set_privacy_enabled", { enabled })) as AppState;
+}
+
+export async function setPrivacyIdleSecs(secs: number): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyIdleSecs: secs });
+  return (await invoke<AppState>("set_privacy_idle_secs", { secs })) as AppState;
+}
+
+export async function setAutohideEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ autohideEnabled: enabled });
+  return (await invoke<AppState>("set_autohide_enabled", { enabled })) as AppState;
+}
+
+export async function setAutohideIdleSecs(secs: number): Promise<AppState> {
+  if (!inTauri()) return fallback({ autohideIdleSecs: secs });
+  return (await invoke<AppState>("set_autohide_idle_secs", { secs })) as AppState;
 }
 
 export async function getPerfSnapshot(): Promise<PerfSnapshot | null> {

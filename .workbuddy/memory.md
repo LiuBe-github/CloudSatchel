@@ -4,7 +4,7 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.9.0
+- 当前版本：v0.10.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
 - 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护）
@@ -14,6 +14,8 @@
 - 双击隐藏/显示桌面图标（SHELLDLL_DefView + WS_EX_LAYERED，动画约 0.5s）
 - 透明任务栏（Win10 Accent API / Win11 TranslucentTB 便携引擎）
 - 主机性能监控（CPU、GPU、内存、网络，约 1 秒本地采样）
+- 隐私操作（空闲超时自动最小化窗口、隐藏图标/任务栏、静音，操作即还原）
+- 任务栏自动隐藏（空闲隐藏，鼠标移到底部弹出，AppBar ABS_AUTOHIDE）
 - 浅色 / 深色 / 跟随系统三主题
 - 无边框 Windows 风格窗口，启动默认尺寸 1280×720
 - 系统托盘与关闭到托盘
@@ -41,6 +43,17 @@
     - Release 安装包：`CloudSatchel_0.9.0_x64-setup.exe`（dev/_rename_installer.ps1 重命名）
     - GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.9.0
   - 发布工具链：winget 安装 gh CLI 2.97.0；认证通过 `git credential fill` 提取凭据管理器中的 OAuth token 设置 GH_TOKEN（gh auth login 未执行）
+- 2026-08-15 按需求文档 v1.2 实现 FR-13 / FR-14，版本升级到 v0.10.0
+  - 核心模块：[src-tauri/src/privacy.rs](src-tauri/src/privacy.rs)（FR-13 隐私操作 + FR-14 任务栏自动隐藏共用空闲轮询）
+  - 空闲检测：GetLastInputInfo 轮询（1 秒），FR-13/FR-14 各自独立计时与配置（默认 60s，可设 30s~60min）
+  - FR-13 触发序列：最小化所有窗口（跳过自身/桌面/任务栏/工具窗口，全屏先转窗口化）→ 隐藏图标（先查已隐藏）→ 隐藏任务栏（先查 autohide）→ 静音（Core Audio IAudioEndpointVolume，仅切静音标志）
+  - FR-13 恢复序列：用户操作（最后输入时间变化）→ 还原窗口（原最大化/全屏尽力还原）→ 图标/任务栏仅还原本功能执行过的 → 取消静音；ACTIVE_LOCK 串行化触发/恢复，PRIVACY_SNAPSHOT 为恢复唯一依据
+  - FR-14：taskbar.rs 新增 set_autohide/is_autohide（SHAppBarMessage ABM_SETSTATE ABS_AUTOHIDE，不写注册表）；全屏/云笈最大化期间暂停；边缘弹出/移开再隐藏由系统原生行为完成
+  - 任务栏隐藏与 FR-13 步骤③共享 is_autohide 判定；AUTOHIDE_APPLIED 标记"由本应用设置"，避免动用户系统原有设置
+  - 持久化扩展：privacy_enabled / privacy_idle_secs / autohide_enabled / autohide_idle_secs（prefs 扁平结构 + serde default，旧文件兼容）
+  - 前端：功能列表第 4 项「隐私操作」卡片；设置面板新增「任务栏」分组（透明任务栏/自动隐藏开关+空闲时间）与「隐私操作」分组（触发空闲时间）
+  - 版本号同步 v0.10.0（Cargo / tauri.conf / package / App / About / Settings）
+  - 依赖新增：windows-sys Win32_UI_Shell + Win32_UI_Input_KeyboardAndMouse；windows Win32_Media_Audio + Win32_Media_Audio_Endpoints
 
 ## 关键工程约定
 

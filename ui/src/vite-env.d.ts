@@ -19,6 +19,11 @@ export interface AppState {
   iconsHidden: boolean; // 图标当前是否隐藏
   taskbarTransparent: boolean; // 任务栏是否透明
   performanceMonitor: boolean; // 主机性能监控是否激活
+  privacyEnabled: boolean; // 隐私操作是否激活
+  privacyIdleSecs: number; // 隐私操作空闲触发时间（秒）
+  privacyActive: boolean; // 隐私操作当前是否已触发
+  autohideEnabled: boolean; // 任务栏自动隐藏是否激活
+  autohideIdleSecs: number; // 任务栏自动隐藏空闲时间（秒）
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）

@@ -17,6 +17,7 @@ mod hooks;
 mod icons;
 mod perf;
 mod prefs;
+mod privacy;
 mod taskbar;
 mod taskbar_engine;
 mod tray;
@@ -43,6 +44,11 @@ struct AppState {
     close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
     background: Mutex<background::BackgroundSettings>, // 背景图片设置
     performance_monitor: Mutex<bool>, // 主机性能监控是否激活
+    privacy_enabled: Mutex<bool>,    // 隐私操作（FR-13）是否激活
+    privacy_idle_secs: Mutex<u32>,   // 隐私操作空闲触发时间（秒）
+    privacy_active: Mutex<bool>,     // 隐私操作当前是否已触发（运行时状态，不入盘）
+    autohide_enabled: Mutex<bool>,   // 任务栏自动隐藏（FR-14）是否激活
+    autohide_idle_secs: Mutex<u32>,  // 任务栏自动隐藏空闲时间（秒）
 }
 
 impl Default for AppState {
@@ -60,6 +66,11 @@ impl Default for AppState {
             close_to_tray: Mutex::new(true),
             background: Mutex::new(background::BackgroundSettings::default()),
             performance_monitor: Mutex::new(false),
+            privacy_enabled: Mutex::new(false),
+            privacy_idle_secs: Mutex::new(60),
+            privacy_active: Mutex::new(false),
+            autohide_enabled: Mutex::new(false),
+            autohide_idle_secs: Mutex::new(60),
         }
     }
 }
@@ -75,6 +86,11 @@ struct Snapshot {
     autostart: bool,
     close_to_tray: bool,
     performance_monitor: bool,
+    privacy_enabled: bool,
+    privacy_idle_secs: u32,
+    privacy_active: bool,
+    autohide_enabled: bool,
+    autohide_idle_secs: u32,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -95,6 +111,11 @@ fn snapshot(state: &AppState) -> Snapshot {
         autostart: *state.autostart.lock().unwrap(),
         close_to_tray: *state.close_to_tray.lock().unwrap(),
         performance_monitor: *state.performance_monitor.lock().unwrap(),
+        privacy_enabled: *state.privacy_enabled.lock().unwrap(),
+        privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
+        privacy_active: *state.privacy_active.lock().unwrap(),
+        autohide_enabled: *state.autohide_enabled.lock().unwrap(),
+        autohide_idle_secs: *state.autohide_idle_secs.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -117,6 +138,10 @@ fn persist(state: &AppState) {
         performance_monitor: *state.performance_monitor.lock().unwrap(),
         theme: state.theme.lock().unwrap().clone(),
         close_to_tray: *state.close_to_tray.lock().unwrap(),
+        privacy_enabled: *state.privacy_enabled.lock().unwrap(),
+        privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
+        autohide_enabled: *state.autohide_enabled.lock().unwrap(),
+        autohide_idle_secs: *state.autohide_idle_secs.lock().unwrap(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -176,10 +201,11 @@ fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
     });
 }
 
-/// 退出前的统一清理：停止全局钩子、恢复桌面图标、恢复任务栏
+/// 退出前的统一清理：停止全局钩子、恢复桌面图标、恢复任务栏、恢复隐私/自动隐藏状态
 fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
     perf::stop();
+    privacy::stop();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
     if *state.taskbar_transparent.lock().unwrap() || *state.taskbar_applied.lock().unwrap() {
@@ -360,6 +386,88 @@ fn get_perf_snapshot() -> Option<perf::PerfSnapshot> {
     perf::latest()
 }
 
+/// 把 4 个空闲类配置同步给 privacy 模块（含关闭时的即时恢复）
+fn sync_idle(state: &AppState) {
+    privacy::configure(
+        *state.privacy_enabled.lock().unwrap(),
+        *state.privacy_idle_secs.lock().unwrap(),
+        *state.autohide_enabled.lock().unwrap(),
+        *state.autohide_idle_secs.lock().unwrap(),
+    );
+}
+
+#[tauri::command]
+fn set_privacy_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.privacy_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    sync_idle(&state);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn set_privacy_idle_secs(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    secs: u32,
+) -> Snapshot {
+    let secs = secs.clamp(privacy::IDLE_CLAMP_MIN, privacy::IDLE_CLAMP_MAX);
+    *state.privacy_idle_secs.lock().unwrap() = secs;
+    sync_idle(&state);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn set_autohide_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.autohide_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    sync_idle(&state);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn set_autohide_idle_secs(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    secs: u32,
+) -> Snapshot {
+    let secs = secs.clamp(privacy::IDLE_CLAMP_MIN, privacy::IDLE_CLAMP_MAX);
+    *state.autohide_idle_secs.lock().unwrap() = secs;
+    sync_idle(&state);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
 #[tauri::command]
 fn set_background(
     app: AppHandle,
@@ -505,6 +613,16 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
         tick += 1;
         // 每约 320ms（4 个 80ms 周期）检查一次前台窗口是否全屏
         if tick % 4 == 0 {
+            // 隐私操作「已触发」状态同步给前端（触发/恢复可能发生在 privacy 轮询线程）
+            let pa = privacy::is_triggered();
+            {
+                let mut cur = state.privacy_active.lock().unwrap();
+                if *cur != pa {
+                    *cur = pa;
+                    drop(cur);
+                    let _ = app.emit("state-updated", snapshot(&state));
+                }
+            }
             let own = fullscreen::find_own_window();
             let fg = fullscreen::foreground_hwnd();
             // 云笈自身前台且最大化 → 按用户的理解视为“全屏”；
@@ -548,6 +666,10 @@ pub fn run() {
     *state.performance_monitor.lock().unwrap() = prefs.performance_monitor;
     *state.theme.lock().unwrap() = prefs.theme.clone();
     *state.close_to_tray.lock().unwrap() = prefs.close_to_tray;
+    *state.privacy_enabled.lock().unwrap() = prefs.privacy_enabled;
+    *state.privacy_idle_secs.lock().unwrap() = prefs.privacy_idle_secs;
+    *state.autohide_enabled.lock().unwrap() = prefs.autohide_enabled;
+    *state.autohide_idle_secs.lock().unwrap() = prefs.autohide_idle_secs;
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -567,6 +689,10 @@ pub fn run() {
             set_autostart,
             set_close_to_tray,
             set_performance_monitor,
+            set_privacy_enabled,
+            set_privacy_idle_secs,
+            set_autohide_enabled,
+            set_autohide_idle_secs,
             get_perf_snapshot,
             set_background,
             choose_background_image,
@@ -588,6 +714,9 @@ pub fn run() {
             if *state.performance_monitor.lock().unwrap() {
                 perf::start();
             }
+            // 隐私操作 / 任务栏自动隐藏：先同步配置再启动空闲轮询
+            sync_idle(&state);
+            privacy::start();
             let app_handle = app.handle().clone();
             if *state.taskbar_transparent.lock().unwrap() {
                 sync_taskbar(&app_handle, &state);
