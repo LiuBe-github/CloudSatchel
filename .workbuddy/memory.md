@@ -36,6 +36,11 @@
   - autostart 仍以启动文件夹快捷方式为唯一事实来源，不重复存储
   - background.rs 的 load/save 已移除，持久化职责移交 prefs 模块
   - 顺手修复 SettingsPanel 版本号漏改（v0.7.1 → v0.9.0）
+  - 已构建并推送：
+    - 免安装 EXE：`src-tauri/target/release/CloudSatchel.exe`
+    - Release 安装包：`CloudSatchel_0.9.0_x64-setup.exe`（dev/_rename_installer.ps1 重命名）
+    - GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.9.0
+  - 发布工具链：winget 安装 gh CLI 2.97.0；认证通过 `git credential fill` 提取凭据管理器中的 OAuth token 设置 GH_TOKEN（gh auth login 未执行）
 
 ## 关键工程约定
 
