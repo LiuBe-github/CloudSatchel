@@ -329,7 +329,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.8.0</div>
+          <div className="sidebar-version">v0.9.0</div>
           </div>
         </aside>
 

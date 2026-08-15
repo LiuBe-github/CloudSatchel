@@ -107,28 +107,8 @@ fn backgrounds_dir() -> PathBuf {
     local_app_data().join("backgrounds")
 }
 
-fn settings_path() -> PathBuf {
-    local_app_data().join("settings.json")
-}
-
-pub fn load() -> BackgroundSettings {
-    fs::read_to_string(settings_path())
-        .ok()
-        .and_then(|text| serde_json::from_str::<BackgroundSettings>(&text).ok())
-        .map(BackgroundSettings::clamped)
-        .unwrap_or_default()
-}
-
-pub fn save(settings: &BackgroundSettings) -> Result<(), String> {
-    let path = settings_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
-}
+// 注：背景设置的读写（settings.json）已统一移交 prefs 模块，
+// 与各功能开关同文件持久化，见 crate::prefs。
 
 // ---------------------------------------------------------------------------
 // 选择 / 复制 / 读取
@@ -198,7 +178,7 @@ pub fn copy_background_image(source_path: &str) -> Result<String, String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     // 清理上一张已复制的背景图（仅限我们自己的 backgrounds 目录，不碰用户原始文件）
-    let old = load().image_path;
+    let old = crate::prefs::load().image_path;
     if !old.is_empty() {
         let old_path = PathBuf::from(&old);
         if old_path.starts_with(&dir) && old_path.is_file() {

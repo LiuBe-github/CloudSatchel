@@ -16,6 +16,7 @@ mod fullscreen;
 mod hooks;
 mod icons;
 mod perf;
+mod prefs;
 mod taskbar;
 mod taskbar_engine;
 mod tray;
@@ -104,6 +105,31 @@ fn snapshot(state: &AppState) -> Snapshot {
     }
 }
 
+/// 把当前「可持久化」的开关与背景设置写入 settings.json。
+///
+/// 每次开关变化后立即保存（与 background::save 的旧行为一致），
+/// 退出 / 崩溃都不丢状态；保存失败只记日志，不打断用户操作。
+fn persist(state: &AppState) {
+    let bg = state.background.lock().unwrap();
+    let prefs = prefs::AppPrefs {
+        enabled: *state.enabled.lock().unwrap(),
+        taskbar_transparent: *state.taskbar_transparent.lock().unwrap(),
+        performance_monitor: *state.performance_monitor.lock().unwrap(),
+        theme: state.theme.lock().unwrap().clone(),
+        close_to_tray: *state.close_to_tray.lock().unwrap(),
+        image_path: bg.image_path.clone(),
+        fit: bg.fit.clone(),
+        dim: bg.dim,
+        blur: bg.blur,
+        scale: bg.scale,
+        position_x: bg.position_x,
+        position_y: bg.position_y,
+    };
+    if let Err(e) = prefs::save(&prefs) {
+        dlog::write(&format!("[prefs] 保存设置失败: {e}"));
+    }
+}
+
 /// 串行化任务栏视觉切换：用户开关与全屏切换可能同时触发，避免 stop/start 竞态
 static TASKBAR_LOCK: Mutex<()> = Mutex::new(());
 
@@ -144,6 +170,7 @@ fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
         if !ok && desired_now {
             // 开启透明失败（例如引擎启动失败）：回滚用户开关，让前端状态与真实一致
             *state2.taskbar_transparent.lock().unwrap() = false;
+            persist(&state2);
         }
         let _ = app2.emit("state-updated", snapshot(&state2));
     });
@@ -236,6 +263,7 @@ fn set_enabled(
         *state.icons_hidden.lock().unwrap() = false;
         *state.pending_toggle.lock().unwrap() = false;
     }
+    persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
@@ -249,6 +277,7 @@ fn set_theme(app: AppHandle, state: State<std::sync::Arc<AppState>>, mode: Strin
         "system".to_string()
     };
     *state.theme.lock().unwrap() = mode;
+    persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
@@ -270,6 +299,7 @@ fn set_taskbar_transparent(
     *state.taskbar_transparent.lock().unwrap() = enabled;
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
+    persist(&state);
     sync_taskbar(&app, &state);
     snap
 }
@@ -294,6 +324,7 @@ fn set_close_to_tray(
     enabled: bool,
 ) -> Result<Snapshot, String> {
     *state.close_to_tray.lock().unwrap() = enabled;
+    persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     Ok(snap)
@@ -318,6 +349,7 @@ fn set_performance_monitor(
     } else {
         perf::stop();
     }
+    persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
@@ -336,7 +368,7 @@ fn set_background(
 ) -> Snapshot {
     let settings = settings.clamped();
     *state.background.lock().unwrap() = settings.clone();
-    let _ = background::save(&settings);
+    persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
@@ -509,10 +541,16 @@ pub fn run() {
     }
 
     let state = std::sync::Arc::new(AppState::default());
+    // 恢复上次退出前的开关与设置（settings.json）
+    let prefs = prefs::load();
+    *state.enabled.lock().unwrap() = prefs.enabled;
+    *state.taskbar_transparent.lock().unwrap() = prefs.taskbar_transparent;
+    *state.performance_monitor.lock().unwrap() = prefs.performance_monitor;
+    *state.theme.lock().unwrap() = prefs.theme.clone();
+    *state.close_to_tray.lock().unwrap() = prefs.close_to_tray;
+    *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
-    // 加载持久化的背景图片设置
-    *state.background.lock().unwrap() = background::load();
 
     // 启动自修复：上次异常退出可能残留透明图标
     icons::ensure_icons_restored();
@@ -543,11 +581,17 @@ pub fn run() {
         .setup(move |app| {
             // 系统托盘（后台驻留入口）
             tray::setup_tray(app)?;
-            // 激活时安装钩子 + 启动轮询
+            // 自动应用上次退出前的功能效果（开关已从 settings.json 恢复）
             if *state.enabled.lock().unwrap() {
                 hooks::start();
             }
+            if *state.performance_monitor.lock().unwrap() {
+                perf::start();
+            }
             let app_handle = app.handle().clone();
+            if *state.taskbar_transparent.lock().unwrap() {
+                sync_taskbar(&app_handle, &state);
+            }
             let st = state.clone();
             std::thread::spawn(move || poll_loop(app_handle, st));
             Ok(())
