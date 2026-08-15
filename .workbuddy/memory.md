@@ -54,6 +54,11 @@
   - 前端：功能列表第 4 项「隐私操作」卡片；设置面板新增「任务栏」分组（透明任务栏/自动隐藏开关+空闲时间）与「隐私操作」分组（触发空闲时间）
   - 版本号同步 v0.10.0（Cargo / tauri.conf / package / App / About / Settings）
   - 依赖新增：windows-sys Win32_UI_Shell + Win32_UI_Input_KeyboardAndMouse；windows Win32_Media_Audio + Win32_Media_Audio_Endpoints
+  - 已构建并推送：
+    - 免安装 EXE：`src-tauri/target/release/CloudSatchel.exe`
+    - Release 安装包：`CloudSatchel_0.10.0_x64-setup.exe`（npm run release 一键构建+重命名）
+    - GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.0
+    - tag：v0.10.0（gh CLI + GH_TOKEN 提取自凭据管理器，与 v0.9.0 同流程）
 
 ## 关键工程约定
 
