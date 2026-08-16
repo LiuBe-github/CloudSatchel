@@ -83,6 +83,18 @@
   - 修复：动画改为 WS_EX_LAYERED + LWA_ALPHA 透明度渐变（16 步 × 10ms ≈ 160ms，alpha 255↔0），隐藏收尾 SW_HIDE、显示先 SW_SHOW；动画前记录原始 exstyle，结束后恢复（避免影响透明引擎）
   - 隐私操作 collect_cb 移除"跳过云笈自身进程"：保护时主窗口一并最小化（需求文档 FR-13 原写"跳过云笈自身窗口"，已按用户要求调整）
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.3
+- 2026-08-15 按需求文档 v1.7 实现 AI 助手与设置项调整：v0.11.0
+  - FR-15 AI 助手：[src-tauri/src/ai.rs](src-tauri/src/ai.rs) + 前端 [ui/src/components/AiPanel.tsx](ui/src/components/AiPanel.tsx)
+    - OpenAI 官方接口固定 base URL；reqwest 代理（OpenAI 无 CORS），SSE 分块解析后经 Tauri 事件（ai-chunk/ai-done/ai-error）逐字推送
+    - 停止生成：futures-util Abortable + AbortHandle::new_pair()（0.3.31 API，注意不是旧的 abort_handle()）；reqwest Response 无 try_clone/abort
+    - API Key：Windows DPAPI（windows crate Win32_Security_Cryptography，注意 0.61 用 CRYPT_INTEGER_BLOB 而非 DATA_BLOB，CryptProtectData 返回 Result<()>，LocalFree 在 Win32::Foundation 且参数是 Option<HLOCAL> 元组结构体）加密存 ai-key.bin，磁盘无明文；cargo test dpapi 往返测试通过
+    - 对话历史仅内存（保留最近 20 条），退出即清；超时 60s；401/429/断网友好提示
+  - 自动隐藏任务栏改为「立即生效」：移除 autohide_idle_secs（prefs/snapshot/command/前端全链路），configure 开启即 set_autohide(true)，全屏只暂停边缘弹出（不再恢复显示）
+  - 隐私操作空闲时间改六档下拉（10/30/60/180/300/600 秒），后端 clamp 保留
+  - 性能监控刷新间隔下拉（200/500/1000ms）：perf.rs PERF_INTERVAL_MS 原子可配 + 前端定时器跟随
+  - 自动化实测：开启 3 秒内立即隐藏 ✓ 边缘弹出 ✓ 移开再隐藏 ✓（无需空闲等待）
+  - 版本号 v0.11.0 全链路同步；已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.0
+  - AI 对话功能（真实 OpenAI 请求）由用户自行测试
 
 ## 关键工程约定
 
