@@ -95,6 +95,11 @@
   - 自动化实测：开启 3 秒内立即隐藏 ✓ 边缘弹出 ✓ 移开再隐藏 ✓（无需空闲等待）
   - 版本号 v0.11.0 全链路同步；已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.0
   - AI 对话功能（真实 OpenAI 请求）由用户自行测试
+- 2026-08-15 修复全屏检测 + 任务栏功能合并到功能列表：v0.11.1
+  - 用户反馈：全屏任务栏不透明不是 100% 触发；功能列表要任务栏相关（自动隐藏+透明合并）
+  - 全屏检测 is_fullscreen_now 改为覆盖面积比 ≥98% 判定（原逐边 2px 容差在无边框全屏/DPI 缩放偏移下漏检）；最大化窗口约 95% 不误判；实测真实全屏窗口进出均正确触发
+  - 功能列表第 2 项改为「任务栏」卡片：透明任务栏 + 自动隐藏两个开关并列（各自持久化）；设置面板「任务栏」分组移除（统一在功能列表操作）；handleToggle 移除 taskbar 分支（卡片独立 Switch）
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.1
 
 ## 关键工程约定
 
