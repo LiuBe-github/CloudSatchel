@@ -69,6 +69,14 @@
   - 自动化验证（等系统空闲后实测）：空闲 10 秒隐藏 ✓ 鼠标移到底部弹出 ✓ 移开 1.5s 再隐藏 ✓ 启动自修复 ✓
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.1
   - 版本号同步 v0.10.1（含根 package.json）
+- 2026-08-15 任务栏滑动动画 + 隐私恢复跳过已最小化窗口：v0.10.2
+  - taskbar.rs：set_autohide 改为滑动动画（约 144ms，12 步×12ms，SetWindowPos 逐帧位移后 SW_HIDE/SW_SHOW）；AUTOHIDE_EXPECTED/AUTOHIDE_ANIMATING 原子标志，动画期间新请求按最新意图排队执行；is_animating() 供轮询暂缓
+  - is_autohide 判定扩展：窗口不可见 OR 完全滑出所在显示器底部（top >= rcMonitor.bottom）
+  - privacy.rs：边缘/空闲检测在动画期间暂缓（避免"弹出又缩回"）；collect_cb 用 IsIconic 跳过触发前已最小化的窗口（恢复时保持最小化）
+  - ensure_restored 扩展：恢复滑出屏幕残留的任务栏位置（SetWindowPos 移回底部原位）
+  - 自动化实测：隐藏动画 ✓ 边缘弹出动画 ✓ 移开再隐藏 ✓（Phase A 全过）
+  - 教训：自动化测试脚本超时/失败路径必须清理残留状态（曾因超时退出导致任务栏被隐藏残留，需手动 ShowWindow 恢复）；隐私触发会最小化用户全部窗口，测试需谨慎
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.2
 
 ## 关键工程约定
 
