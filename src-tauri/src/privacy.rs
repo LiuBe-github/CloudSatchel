@@ -36,20 +36,25 @@ use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowPlacement, GetWindowRect,
-    GetWindowThreadProcessId, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE, GW_OWNER,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED, WS_EX_TOOLWINDOW,
-    WINDOWPLACEMENT,
+    EnumWindows, GetClassNameW, GetCursorPos, GetWindow, GetWindowLongW, GetWindowPlacement,
+    GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE,
+    GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED,
+    WS_EX_TOOLWINDOW, WINDOWPLACEMENT,
 };
 
 use crate::dlog;
 use crate::icons;
 use crate::taskbar;
 
-/// 空闲时间可设范围：30 秒 ~ 60 分钟（需求 FR-13 / FR-14）
-pub const IDLE_CLAMP_MIN: u32 = 30;
+/// 空闲时间可设范围：10 秒 ~ 60 分钟（需求 FR-13 / FR-14）
+pub const IDLE_CLAMP_MIN: u32 = 10;
 pub const IDLE_CLAMP_MAX: u32 = 3600;
-const POLL_MS: u64 = 1000;
+/// 轮询 tick：50ms（边缘弹出响应）＋ 每 20 tick（1 秒）做一次空闲检测
+const POLL_MS: u64 = 50;
+/// 边缘弹出检测时任务栏矩形外扩像素
+const EDGE_PADDING: i32 = 4;
+/// 鼠标移出任务栏区域后延迟多久重新隐藏（给开始菜单等操作留出时间）
+const HIDE_DELAY_MS: u64 = 1500;
 
 // ---------------------------------------------------------------------------
 // 配置与运行时状态
@@ -187,51 +192,121 @@ fn last_input_tick() -> u32 {
 fn poll_loop() {
     dlog::write("[privacy] poll loop started");
     let mut prev_input: u32 = last_input_tick();
+    let mut fullscreen = false;
+    let mut last_leave: Option<std::time::Instant> = None;
+    let mut tick: u64 = 0;
     loop {
         std::thread::sleep(Duration::from_millis(POLL_MS));
         if !RUNNING.load(Ordering::SeqCst) {
             break;
         }
+        tick += 1;
         let cfg = *CFG.lock().unwrap();
-        let input = last_input_tick();
-        // 32 位 tick 回绕安全（wrapping_sub）
-        let idle_ms = unsafe { GetTickCount() }.wrapping_sub(input);
-        let input_changed = input != prev_input;
-        prev_input = input;
-        let fullscreen = crate::fullscreen::is_fullscreen_effective();
 
-        // —— FR-14 任务栏自动隐藏 ——
-        if cfg.autohide_enabled {
-            if fullscreen {
-                // 全屏暂停：由本应用设置的隐藏先恢复显示，避免遮挡全屏内容
-                if AUTOHIDE_APPLIED.swap(false, Ordering::SeqCst) {
+        // —— FR-14 边缘弹出 / 再隐藏（每 tick，约 50ms 响应）——
+        if cfg.autohide_enabled && !fullscreen && AUTOHIDE_APPLIED.load(Ordering::SeqCst) {
+            let pos = cursor_pos();
+            if in_taskbar_area(pos) {
+                // 鼠标在任务栏（或其边缘）：弹出显示
+                if taskbar::is_autohide() {
                     let _ = taskbar::set_autohide(false);
+                    dlog::write("[privacy] autohide: edge popup -> show");
                 }
-            } else if !AUTOHIDE_APPLIED.load(Ordering::SeqCst)
-                && u64::from(idle_ms) >= u64::from(cfg.autohide_idle_secs) * 1000
-            {
-                if taskbar::set_autohide(true) {
-                    AUTOHIDE_APPLIED.store(true, Ordering::SeqCst);
-                    dlog::write("[privacy] autohide: taskbar hidden");
+                last_leave = None;
+            } else if !taskbar::is_autohide() {
+                // 鼠标已离开任务栏：延迟后重新隐藏
+                let now = std::time::Instant::now();
+                match last_leave {
+                    None => last_leave = Some(now),
+                    Some(t) if now.duration_since(t).as_millis() as u64 >= HIDE_DELAY_MS => {
+                        let _ = taskbar::set_autohide(true);
+                        last_leave = None;
+                        dlog::write("[privacy] autohide: re-hide after leave");
+                    }
+                    _ => {}
                 }
+            } else {
+                last_leave = None;
             }
-            // 用户操作只重置计时（下一轮 idle_ms 重新累计），不改变任务栏显示状态：
-            // 未隐藏 → 保持显示；已隐藏 → 边缘弹出/再隐藏由系统原生行为完成。
         }
 
-        // —— FR-13 隐私操作 ——
-        if cfg.privacy_enabled {
-            if !PRIVACY_TRIGGERED.load(Ordering::SeqCst)
-                && u64::from(idle_ms) >= u64::from(cfg.privacy_idle_secs) * 1000
-            {
-                trigger_privacy_async();
-            } else if PRIVACY_TRIGGERED.load(Ordering::SeqCst) && input_changed {
-                dlog::write("[privacy] user input detected -> restore");
-                restore_privacy_async();
+        // —— 空闲检测（每 1 秒 = 20 tick）——
+        if tick % 20 == 0 {
+            fullscreen = crate::fullscreen::is_fullscreen_effective();
+            let input = last_input_tick();
+            // 32 位 tick 回绕安全（wrapping_sub）
+            let idle_ms = unsafe { GetTickCount() }.wrapping_sub(input);
+            let input_changed = input != prev_input;
+            prev_input = input;
+
+            // —— FR-14 任务栏自动隐藏 ——
+            if cfg.autohide_enabled {
+                if fullscreen {
+                    // 全屏暂停：由本应用设置的隐藏先恢复显示，避免遮挡全屏内容
+                    if AUTOHIDE_APPLIED.swap(false, Ordering::SeqCst) {
+                        let _ = taskbar::set_autohide(false);
+                        last_leave = None;
+                        dlog::write("[privacy] autohide: fullscreen pause -> show");
+                    }
+                } else if !AUTOHIDE_APPLIED.load(Ordering::SeqCst)
+                    && u64::from(idle_ms) >= u64::from(cfg.autohide_idle_secs) * 1000
+                {
+                    if taskbar::set_autohide(true) {
+                        AUTOHIDE_APPLIED.store(true, Ordering::SeqCst);
+                        last_leave = None;
+                        dlog::write("[privacy] autohide: idle timeout -> hide");
+                    }
+                }
+                // 用户操作只重置计时（下一轮 idle_ms 重新累计），不改变任务栏显示状态：
+                // 未隐藏 → 保持显示；已隐藏 → 保持隐藏（鼠标到边缘再弹出）。
+            }
+
+            // —— FR-13 隐私操作 ——
+            if cfg.privacy_enabled {
+                if !PRIVACY_TRIGGERED.load(Ordering::SeqCst)
+                    && u64::from(idle_ms) >= u64::from(cfg.privacy_idle_secs) * 1000
+                {
+                    trigger_privacy_async();
+                } else if PRIVACY_TRIGGERED.load(Ordering::SeqCst) && input_changed {
+                    dlog::write("[privacy] user input detected -> restore");
+                    restore_privacy_async();
+                }
             }
         }
     }
     dlog::write("[privacy] poll loop stopped");
+}
+
+fn cursor_pos() -> POINT {
+    let mut p = POINT { x: 0, y: 0 };
+    unsafe {
+        GetCursorPos(&mut p);
+    }
+    p
+}
+
+/// 鼠标是否位于任一任务栏窗口矩形（外扩 EDGE_PADDING 像素）
+fn in_taskbar_area(pos: POINT) -> bool {
+    unsafe {
+        for hwnd in taskbar::taskbar_windows() {
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(hwnd, &mut r) != 0 {
+                if pos.x >= r.left - EDGE_PADDING
+                    && pos.x <= r.right + EDGE_PADDING
+                    && pos.y >= r.top - EDGE_PADDING
+                    && pos.y <= r.bottom + EDGE_PADDING
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

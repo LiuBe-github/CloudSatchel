@@ -131,7 +131,9 @@ pub fn load() -> AppPrefs {
     let Ok(text) = fs::read_to_string(settings_path()) else {
         return AppPrefs::default();
     };
-    let mut prefs = serde_json::from_str::<AppPrefs>(&text).unwrap_or_default();
+    // 容忍 UTF-8 BOM（第三方工具写入可能带 BOM，serde 无法解析会静默丢设置）
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let mut prefs = serde_json::from_str::<AppPrefs>(text).unwrap_or_default();
     if !matches!(prefs.theme.as_str(), "light" | "dark" | "system") {
         prefs.theme = default_theme();
     }

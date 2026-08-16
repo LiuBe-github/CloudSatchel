@@ -12,16 +12,15 @@
 use std::mem::size_of;
 
 use windows_sys::core::{s, w};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows_sys::Win32::Foundation::{HWND, LPARAM};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
     HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD,
 };
-use windows_sys::Win32::UI::Shell::{
-    SHAppBarMessage, ABM_GETSTATE, ABM_SETSTATE, ABS_AUTOHIDE, APPBARDATA,
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, FindWindowW, GetClassNameW, IsWindowVisible, ShowWindow, SW_HIDE, SW_SHOW,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowW, GetClassNameW};
 
 const ACCENT_DISABLED: u32 = 0;
 const ACCENT_ENABLE_TRANSPARENTGRADIENT: u32 = 2;
@@ -228,72 +227,77 @@ pub fn restore() {
 // ---------------------------------------------------------------------------
 // 任务栏自动隐藏（FR-14 / FR-13 步骤③ 共用）
 // ---------------------------------------------------------------------------
+//
+// 注：早期实现使用 SHAppBarMessage(ABM_SETSTATE, ABS_AUTOHIDE)。实测 Windows 11
+// 25H2（build 26200）上该调用只改变 AppBar 状态位，任务栏视觉上不隐藏，
+// 因此改为直接控制任务栏窗口可见性（ShowWindow），边缘弹出/再隐藏由
+// privacy.rs 的空闲轮询线程检测鼠标位置实现。不写注册表。
 
 fn taskbar_hwnd() -> HWND {
     unsafe { FindWindowW(w!("Shell_TrayWnd"), std::ptr::null()) }
 }
 
-/// 查询任务栏当前是否处于自动隐藏状态（AppBar 运行时状态，含系统自身设置）
+unsafe extern "system" fn enum_taskbars(hwnd: HWND, lparam: LPARAM) -> i32 {
+    let list = &mut *(lparam as *mut Vec<HWND>);
+    let mut buf = [0u16; 128];
+    let n = GetClassNameW(hwnd, buf.as_mut_ptr(), 128);
+    if n > 0 {
+        let cls = String::from_utf16_lossy(&buf[..n as usize]);
+        if cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" {
+            list.push(hwnd);
+        }
+    }
+    1
+}
+
+/// 所有任务栏窗口（主任务栏 + 多显示器副任务栏）
+pub fn taskbar_windows() -> Vec<HWND> {
+    let mut list: Vec<HWND> = Vec::new();
+    unsafe {
+        EnumWindows(Some(enum_taskbars), &mut list as *mut Vec<HWND> as LPARAM);
+    }
+    list
+}
+
+/// 任务栏当前是否处于隐藏状态（主任务栏窗口不可见）
 pub fn is_autohide() -> bool {
     let hwnd = taskbar_hwnd();
     if hwnd.is_null() {
         return false;
     }
-    unsafe {
-        let mut abd = APPBARDATA {
-            cbSize: size_of::<APPBARDATA>() as u32,
-            hWnd: hwnd,
-            uCallbackMessage: 0,
-            uEdge: 0,
-            rc: RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            },
-            lParam: 0,
-        };
-        SHAppBarMessage(ABM_GETSTATE, &mut abd) as u32 == ABS_AUTOHIDE
-    }
+    unsafe { IsWindowVisible(hwnd) == 0 }
 }
 
-/// 设置任务栏自动隐藏（ABS_AUTOHIDE / 恢复为不自动隐藏）。
+/// 隐藏 / 恢复显示所有任务栏窗口（SW_HIDE / SW_SHOW）。
 ///
-/// 仅改变运行时 AppBar 状态，不写注册表、不改系统「自动隐藏任务栏」设置开关；
-/// 隐藏后的边缘弹出 / 移开再隐藏由系统原生行为完成。
+/// 隐藏后的边缘弹出与移开再隐藏由 privacy.rs 轮询鼠标位置完成；
+/// 不写注册表、不改系统「自动隐藏任务栏」设置开关。
 pub fn set_autohide(enabled: bool) -> bool {
-    let hwnd = taskbar_hwnd();
-    if hwnd.is_null() {
+    let hwnds = taskbar_windows();
+    if hwnds.is_empty() {
         return false;
     }
     unsafe {
-        let mut abd = APPBARDATA {
-            cbSize: size_of::<APPBARDATA>() as u32,
-            hWnd: hwnd,
-            uCallbackMessage: 0,
-            uEdge: 0,
-            rc: RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            },
-            lParam: if enabled {
-                ABS_AUTOHIDE as isize
-            } else {
-                0 // ABS_NONE
-            },
-        };
-        SHAppBarMessage(ABM_SETSTATE, &mut abd) != 0
+        for hwnd in hwnds {
+            ShowWindow(hwnd, if enabled { SW_HIDE } else { SW_SHOW });
+        }
     }
+    true
 }
 
-/// 启动自检：清理旧版注册表实验遗留，并结束异常退出残留的引擎进程
+/// 启动自检：清理旧版注册表实验遗留、结束异常退出残留的引擎进程，
+/// 并恢复异常退出时残留的隐藏任务栏（仅恢复被 SW_HIDE 的任务栏窗口，
+/// 不影响系统自身的「自动隐藏任务栏」设置——该设置下窗口仍为可见标志）。
 pub fn ensure_restored() {
     unsafe {
         if let Some(hkey) = open_advanced_key() {
             restore_old_registry_backup(hkey);
             RegCloseKey(hkey);
+        }
+        for hwnd in taskbar_windows() {
+            if IsWindowVisible(hwnd) == 0 {
+                ShowWindow(hwnd, SW_SHOW);
+            }
         }
     }
     crate::taskbar_engine::stop();

@@ -200,7 +200,7 @@ export function SettingsPanel({
           <RangeRow
             label="自动隐藏空闲时间"
             value={autohideIdleSecs}
-            min={30}
+            min={10}
             max={3600}
             step={10}
             format={formatIdle}
@@ -213,7 +213,7 @@ export function SettingsPanel({
           <RangeRow
             label="触发空闲时间"
             value={privacyIdleSecs}
-            min={30}
+            min={10}
             max={3600}
             step={10}
             format={formatIdle}
@@ -253,7 +253,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.10.0</span>
+          <span className="settings-version">云笈 · v0.10.1</span>
         </div>
       </div>
     </div>
