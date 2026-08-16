@@ -1,6 +1,6 @@
 [package]
 name = "cloud-satchel"
-version = "0.10.3"
+version = "0.11.0"
 description = "云笈 - 纯净本地 Windows 桌面工具"
 authors = ["LiuBe"]
 edition = "2021"
@@ -24,6 +24,8 @@ serde_json = "1"
 base64 = "0.22"
 sysinfo = "0.30"
 nvml-wrapper = "0.10"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = { version = "0.3", features = ["std", "alloc"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -42,8 +44,9 @@ windows-sys = { version = "0.59", features = [
   "Win32_NetworkManagement_IpHelper",
 ] }
 # 完整 COM 接口（IShellLinkW / IPersistFile），用于创建启动文件夹快捷方式；
-# Win32_Media_Audio(_Endpoints) 用于系统静音（IAudioEndpointVolume）
-windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints"] }
+# Win32_Media_Audio(_Endpoints) 用于系统静音（IAudioEndpointVolume）；
+# Win32_Security_Cryptography 用于 AI API Key 的 DPAPI 加密
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Security_Cryptography"] }
 
 [profile.release]
 codegen-units = 1

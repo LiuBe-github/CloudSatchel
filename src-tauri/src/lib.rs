@@ -9,6 +9,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod autostart;
 mod background;
 mod dlog;
@@ -47,8 +48,9 @@ struct AppState {
     privacy_enabled: Mutex<bool>,    // 隐私操作（FR-13）是否激活
     privacy_idle_secs: Mutex<u32>,   // 隐私操作空闲触发时间（秒）
     privacy_active: Mutex<bool>,     // 隐私操作当前是否已触发（运行时状态，不入盘）
-    autohide_enabled: Mutex<bool>,   // 任务栏自动隐藏（FR-14）是否激活
-    autohide_idle_secs: Mutex<u32>,  // 任务栏自动隐藏空闲时间（秒）
+    autohide_enabled: Mutex<bool>,   // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
+    perf_interval_ms: Mutex<u32>,    // 性能监控采样间隔（毫秒）
+    ai_model: Mutex<String>,         // AI 助手模型名
 }
 
 impl Default for AppState {
@@ -70,7 +72,8 @@ impl Default for AppState {
             privacy_idle_secs: Mutex::new(60),
             privacy_active: Mutex::new(false),
             autohide_enabled: Mutex::new(false),
-            autohide_idle_secs: Mutex::new(60),
+            perf_interval_ms: Mutex::new(1000),
+            ai_model: Mutex::new("gpt-4o-mini".to_string()),
         }
     }
 }
@@ -90,7 +93,8 @@ struct Snapshot {
     privacy_idle_secs: u32,
     privacy_active: bool,
     autohide_enabled: bool,
-    autohide_idle_secs: u32,
+    perf_interval_ms: u32,
+    ai_model: String,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -115,7 +119,8 @@ fn snapshot(state: &AppState) -> Snapshot {
         privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
         privacy_active: *state.privacy_active.lock().unwrap(),
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
-        autohide_idle_secs: *state.autohide_idle_secs.lock().unwrap(),
+        perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
+        ai_model: state.ai_model.lock().unwrap().clone(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -141,7 +146,8 @@ fn persist(state: &AppState) {
         privacy_enabled: *state.privacy_enabled.lock().unwrap(),
         privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
-        autohide_idle_secs: *state.autohide_idle_secs.lock().unwrap(),
+        perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
+        ai_model: state.ai_model.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -386,13 +392,12 @@ fn get_perf_snapshot() -> Option<perf::PerfSnapshot> {
     perf::latest()
 }
 
-/// 把 4 个空闲类配置同步给 privacy 模块（含关闭时的即时恢复）
+/// 把空闲类配置同步给 privacy 模块（含开关变化时的即时动作）
 fn sync_idle(state: &AppState) {
     privacy::configure(
         *state.privacy_enabled.lock().unwrap(),
         *state.privacy_idle_secs.lock().unwrap(),
         *state.autohide_enabled.lock().unwrap(),
-        *state.autohide_idle_secs.lock().unwrap(),
     );
 }
 
@@ -454,14 +459,28 @@ fn set_autohide_enabled(
 }
 
 #[tauri::command]
-fn set_autohide_idle_secs(
+fn set_perf_interval_ms(
     app: AppHandle,
     state: State<std::sync::Arc<AppState>>,
-    secs: u32,
+    ms: u32,
 ) -> Snapshot {
-    let secs = secs.clamp(privacy::IDLE_CLAMP_MIN, privacy::IDLE_CLAMP_MAX);
-    *state.autohide_idle_secs.lock().unwrap() = secs;
-    sync_idle(&state);
+    let ms = ms.clamp(200, 1000);
+    *state.perf_interval_ms.lock().unwrap() = ms;
+    perf::set_interval_ms(ms as u64);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn set_ai_model(app: AppHandle, state: State<std::sync::Arc<AppState>>, model: String) -> Snapshot {
+    let model = if model.trim().is_empty() {
+        "gpt-4o-mini".to_string()
+    } else {
+        model.trim().to_string()
+    };
+    *state.ai_model.lock().unwrap() = model;
     persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
@@ -669,10 +688,12 @@ pub fn run() {
     *state.privacy_enabled.lock().unwrap() = prefs.privacy_enabled;
     *state.privacy_idle_secs.lock().unwrap() = prefs.privacy_idle_secs;
     *state.autohide_enabled.lock().unwrap() = prefs.autohide_enabled;
-    *state.autohide_idle_secs.lock().unwrap() = prefs.autohide_idle_secs;
+    *state.perf_interval_ms.lock().unwrap() = prefs.perf_interval_ms;
+    *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
+    perf::set_interval_ms(prefs.perf_interval_ms as u64);
 
     // 启动自修复：上次异常退出可能残留透明图标
     icons::ensure_icons_restored();
@@ -692,8 +713,13 @@ pub fn run() {
             set_privacy_enabled,
             set_privacy_idle_secs,
             set_autohide_enabled,
-            set_autohide_idle_secs,
+            set_perf_interval_ms,
+            set_ai_model,
             get_perf_snapshot,
+            ai::get_ai_config,
+            ai::save_ai_key,
+            ai::ai_send,
+            ai::ai_stop,
             set_background,
             choose_background_image,
             copy_background_image,

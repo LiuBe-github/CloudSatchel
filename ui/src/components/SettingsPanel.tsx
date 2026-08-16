@@ -15,8 +15,6 @@ interface SettingsPanelProps {
   onTaskbarTransparentChange: (enabled: boolean) => void;
   autohideEnabled: boolean;
   onAutohideChange: (enabled: boolean) => void;
-  autohideIdleSecs: number;
-  onAutohideIdleChange: (secs: number) => void;
   privacyIdleSecs: number;
   onPrivacyIdleChange: (secs: number) => void;
   background: BackgroundSettings;
@@ -39,6 +37,16 @@ const FIT_OPTIONS: { value: BackgroundFit; label: string }[] = [
   { value: "repeat", label: "平铺" },
 ];
 
+/** 隐私操作空闲时间六档选项（秒） */
+const PRIVACY_IDLE_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 10, label: "10 秒" },
+  { value: 30, label: "30 秒" },
+  { value: 60, label: "1 分钟" },
+  { value: 180, label: "3 分钟" },
+  { value: 300, label: "5 分钟" },
+  { value: 600, label: "10 分钟" },
+];
+
 /** 空闲时间显示：<60 秒显示「X 秒」，否则显示「X 分钟」 */
 const formatIdle = (v: number): string =>
   v < 60 ? `${v} 秒` : `${Math.round(v / 60)} 分钟`;
@@ -55,8 +63,6 @@ export function SettingsPanel({
   onTaskbarTransparentChange,
   autohideEnabled,
   onAutohideChange,
-  autohideIdleSecs,
-  onAutohideIdleChange,
   privacyIdleSecs,
   onPrivacyIdleChange,
   background,
@@ -193,34 +199,33 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">任务栏自动隐藏</div>
-              <div className="setting-row-desc">空闲时整个任务栏自动隐藏；鼠标移到屏幕下边界弹出，移开再隐藏（不写注册表）</div>
+              <div className="setting-row-desc">开启后任务栏立即隐藏；鼠标移到屏幕下边界弹出，移开再隐藏（不写注册表）</div>
             </div>
             <Switch checked={autohideEnabled} onChange={() => onAutohideChange(!autohideEnabled)} />
           </div>
-          <RangeRow
-            label="自动隐藏空闲时间"
-            value={autohideIdleSecs}
-            min={10}
-            max={3600}
-            step={10}
-            format={formatIdle}
-            onChange={onAutohideIdleChange}
-          />
         </div>
 
         <div className="settings-section">
           <div className="settings-label">隐私操作</div>
-          <RangeRow
-            label="触发空闲时间"
-            value={privacyIdleSecs}
-            min={10}
-            max={3600}
-            step={10}
-            format={formatIdle}
-            onChange={onPrivacyIdleChange}
-          />
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">触发空闲时间</div>
+              <div className="setting-row-desc">空闲超过该时长自动执行隐私保护（当前 {formatIdle(privacyIdleSecs)}）</div>
+            </div>
+            <select
+              className="select-box"
+              value={privacyIdleSecs}
+              onChange={(e) => onPrivacyIdleChange(Number(e.target.value))}
+            >
+              {PRIVACY_IDLE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="setting-row-desc" style={{ marginTop: 8 }}>
-            空闲超过设定时间自动最小化所有窗口、隐藏桌面图标与任务栏并静音；操作鼠标或键盘立即还原
+            空闲超时自动最小化所有窗口、隐藏桌面图标与任务栏并静音；操作鼠标或键盘立即还原
           </div>
         </div>
 
@@ -253,7 +258,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.10.3</span>
+          <span className="settings-version">云笈 · v0.11.0</span>
         </div>
       </div>
     </div>

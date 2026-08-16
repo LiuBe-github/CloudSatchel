@@ -64,7 +64,6 @@ struct Config {
     privacy_enabled: bool,
     privacy_idle_secs: u32,
     autohide_enabled: bool,
-    autohide_idle_secs: u32,
 }
 
 impl Default for Config {
@@ -73,7 +72,6 @@ impl Default for Config {
             privacy_enabled: false,
             privacy_idle_secs: 60,
             autohide_enabled: false,
-            autohide_idle_secs: 60,
         }
     }
 }
@@ -82,7 +80,6 @@ static CFG: Mutex<Config> = Mutex::new(Config {
     privacy_enabled: false,
     privacy_idle_secs: 60,
     autohide_enabled: false,
-    autohide_idle_secs: 60,
 });
 static THREAD: OnceLock<()> = OnceLock::new();
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -142,27 +139,28 @@ pub fn stop() {
     }
 }
 
-/// 同步配置（开关与空闲时间），并处理关闭时的即时恢复
-pub fn configure(
-    privacy_enabled: bool,
-    privacy_idle_secs: u32,
-    autohide_enabled: bool,
-    autohide_idle_secs: u32,
-) {
+/// 同步配置（开关与空闲时间），并处理开关变化时的即时动作：
+/// 自动隐藏开启 → 任务栏立即隐藏；关闭 → 立即恢复显示。
+pub fn configure(privacy_enabled: bool, privacy_idle_secs: u32, autohide_enabled: bool) {
     let mut cfg = CFG.lock().unwrap();
     cfg.privacy_enabled = privacy_enabled;
     cfg.privacy_idle_secs = privacy_idle_secs.clamp(IDLE_CLAMP_MIN, IDLE_CLAMP_MAX);
     cfg.autohide_enabled = autohide_enabled;
-    cfg.autohide_idle_secs = autohide_idle_secs.clamp(IDLE_CLAMP_MIN, IDLE_CLAMP_MAX);
     drop(cfg);
 
     if !privacy_enabled && PRIVACY_TRIGGERED.load(Ordering::SeqCst) {
         dlog::write("[privacy] switch off while triggered -> restore");
         restore_privacy_async();
     }
-    if !autohide_enabled && AUTOHIDE_APPLIED.load(Ordering::SeqCst) {
-        AUTOHIDE_APPLIED.store(false, Ordering::SeqCst);
+    if autohide_enabled {
+        // 立即隐藏（不依赖空闲检测）
+        if !AUTOHIDE_APPLIED.swap(true, Ordering::SeqCst) {
+            let _ = taskbar::set_autohide(true);
+            dlog::write("[privacy] autohide: enabled -> hide immediately");
+        }
+    } else if AUTOHIDE_APPLIED.swap(false, Ordering::SeqCst) {
         let _ = taskbar::set_autohide(false);
+        dlog::write("[privacy] autohide: disabled -> restore");
     }
 }
 
@@ -242,29 +240,6 @@ fn poll_loop() {
             let input_changed = input != prev_input;
             prev_input = input;
 
-            // —— FR-14 任务栏自动隐藏 ——
-            if cfg.autohide_enabled {
-                if fullscreen {
-                    // 全屏暂停：由本应用设置的隐藏先恢复显示，避免遮挡全屏内容
-                    if AUTOHIDE_APPLIED.swap(false, Ordering::SeqCst) {
-                        let _ = taskbar::set_autohide(false);
-                        last_leave = None;
-                        dlog::write("[privacy] autohide: fullscreen pause -> show");
-                    }
-                } else if !AUTOHIDE_APPLIED.load(Ordering::SeqCst)
-                    && !taskbar::is_animating()
-                    && u64::from(idle_ms) >= u64::from(cfg.autohide_idle_secs) * 1000
-                {
-                    if taskbar::set_autohide(true) {
-                        AUTOHIDE_APPLIED.store(true, Ordering::SeqCst);
-                        last_leave = None;
-                        dlog::write("[privacy] autohide: idle timeout -> hide");
-                    }
-                }
-                // 用户操作只重置计时（下一轮 idle_ms 重新累计），不改变任务栏显示状态：
-                // 未隐藏 → 保持显示；已隐藏 → 保持隐藏（鼠标到边缘再弹出）。
-            }
-
             // —— FR-13 隐私操作 ——
             if cfg.privacy_enabled {
                 if !PRIVACY_TRIGGERED.load(Ordering::SeqCst)
@@ -276,6 +251,8 @@ fn poll_loop() {
                     restore_privacy_async();
                 }
             }
+            // FR-02 开关二（自动隐藏）不依赖空闲检测：开启即隐藏，见 configure；
+            // 边缘弹出 / 移开再隐藏由上方每 tick 的边缘检测处理。
         }
     }
     dlog::write("[privacy] poll loop stopped");

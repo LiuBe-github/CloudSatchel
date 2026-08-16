@@ -23,6 +23,12 @@ fn default_theme() -> String {
 fn default_idle_secs() -> u32 {
     60
 }
+fn default_perf_interval() -> u32 {
+    1000
+}
+fn default_ai_model() -> String {
+    "gpt-4o-mini".to_string()
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -58,9 +64,11 @@ pub struct AppPrefs {
     #[serde(default = "default_idle_secs")]
     pub privacy_idle_secs: u32, // 隐私操作空闲时间（秒）
     #[serde(default)]
-    pub autohide_enabled: bool, // 任务栏自动隐藏（FR-14）
-    #[serde(default = "default_idle_secs")]
-    pub autohide_idle_secs: u32, // 任务栏自动隐藏空闲时间（秒）
+    pub autohide_enabled: bool, // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
+    #[serde(default = "default_perf_interval")]
+    pub perf_interval_ms: u32, // 性能监控采样间隔（毫秒）
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String, // AI 助手模型名（API Key 单独 DPAPI 加密存储）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -90,7 +98,8 @@ impl Default for AppPrefs {
             privacy_enabled: false,
             privacy_idle_secs: default_idle_secs(),
             autohide_enabled: false,
-            autohide_idle_secs: default_idle_secs(),
+            perf_interval_ms: default_perf_interval(),
+            ai_model: default_ai_model(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

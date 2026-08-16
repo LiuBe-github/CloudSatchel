@@ -116,9 +116,24 @@ interface PerformancePanelProps {
   enabled: boolean;
   busy: boolean;
   onChange: () => void;
+  /** 采样/刷新间隔（毫秒） */
+  intervalMs: number;
+  onIntervalChange: (ms: number) => void;
 }
 
-export function PerformancePanel({ enabled, busy, onChange }: PerformancePanelProps) {
+const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 200, label: "200ms" },
+  { value: 500, label: "500ms" },
+  { value: 1000, label: "1000ms" },
+];
+
+export function PerformancePanel({
+  enabled,
+  busy,
+  onChange,
+  intervalMs,
+  onIntervalChange,
+}: PerformancePanelProps) {
   const [section, setSection] = useState<PerfSection>("cpu");
   const [snapshot, setSnapshot] = useState<PerfSnapshot | null>(null);
   const [history, setHistory] = useState<PerfSnapshot[]>([]);
@@ -141,12 +156,12 @@ export function PerformancePanel({ enabled, busy, onChange }: PerformancePanelPr
       }
     };
     void tick();
-    const timer = window.setInterval(tick, 1000);
+    const timer = window.setInterval(tick, intervalMs);
     return () => {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [enabled]);
+  }, [enabled, intervalMs]);
 
   const chartSeries = useMemo<Series[]>(() => {
     if (!snapshot) return [];
@@ -334,10 +349,26 @@ export function PerformancePanel({ enabled, busy, onChange }: PerformancePanelPr
           <span className={`state-dot ${enabled ? "on" : "off"}`} />
           <div>
             <div className="state-label">{enabled ? "功能已激活" : "功能已停用"}</div>
-            <div className="state-hint">{enabled ? "正在本地采集 · 刷新间隔约 1 秒" : "开启后开始实时监控"}</div>
+            <div className="state-hint">
+              {enabled ? `正在本地采集 · 刷新间隔 ${intervalMs}ms` : "开启后开始实时监控"}
+            </div>
           </div>
         </div>
-        <Switch checked={enabled} onChange={onChange} disabled={busy} />
+        <div className="perf-switch-group">
+          <select
+            className="select-box"
+            value={intervalMs}
+            onChange={(e) => onIntervalChange(Number(e.target.value))}
+            title="刷新间隔"
+          >
+            {INTERVAL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <Switch checked={enabled} onChange={onChange} disabled={busy} />
+        </div>
       </div>
 
       <div className="perf-layout">

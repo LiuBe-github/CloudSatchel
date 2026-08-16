@@ -22,8 +22,9 @@ export interface AppState {
   privacyEnabled: boolean; // 隐私操作是否激活
   privacyIdleSecs: number; // 隐私操作空闲触发时间（秒）
   privacyActive: boolean; // 隐私操作当前是否已触发
-  autohideEnabled: boolean; // 任务栏自动隐藏是否激活
-  autohideIdleSecs: number; // 任务栏自动隐藏空闲时间（秒）
+  autohideEnabled: boolean; // 任务栏自动隐藏是否激活（开启即隐藏）
+  perfIntervalMs: number; // 性能监控采样间隔（毫秒）
+  aiModel: string; // AI 助手模型名
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
@@ -35,6 +36,16 @@ export interface AppState {
   backgroundScale: number;
   backgroundPositionX: number;
   backgroundPositionY: number;
+}
+
+export interface AiMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface AiConfig {
+  hasKey: boolean;
+  model: string;
 }
 
 export interface CpuMetrics {

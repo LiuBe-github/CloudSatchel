@@ -8,7 +8,7 @@
 
 #![allow(non_snake_case)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -91,6 +91,13 @@ pub struct NetworkMetrics {
 static PERF_ENABLED: AtomicBool = AtomicBool::new(false);
 static PERF_LATEST: Mutex<Option<PerfSnapshot>> = Mutex::new(None);
 static PERF_THREAD: OnceLock<()> = OnceLock::new();
+/// 采样间隔（毫秒）：200 / 500 / 1000，可随时切换，下一轮采样即时生效
+static PERF_INTERVAL_MS: AtomicU64 = AtomicU64::new(1000);
+
+/// 设置采样间隔（夹紧到 200ms ~ 1000ms）
+pub fn set_interval_ms(ms: u64) {
+    PERF_INTERVAL_MS.store(ms.clamp(200, 1000), Ordering::SeqCst);
+}
 
 pub fn start() {
     ensure_running();
@@ -120,9 +127,10 @@ fn ensure_running() {
                 let snapshot = sampler.sample();
                 *PERF_LATEST.lock().unwrap() = Some(snapshot);
 
+                let interval = PERF_INTERVAL_MS.load(Ordering::SeqCst);
                 let elapsed = started.elapsed();
-                if elapsed < Duration::from_secs(1) {
-                    std::thread::sleep(Duration::from_secs(1) - elapsed);
+                if elapsed < Duration::from_millis(interval) {
+                    std::thread::sleep(Duration::from_millis(interval) - elapsed);
                 }
             }
         });

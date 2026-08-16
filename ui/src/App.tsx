@@ -9,7 +9,7 @@ import {
   setPrivacyEnabled,
   setPrivacyIdleSecs,
   setAutohideEnabled,
-  setAutohideIdleSecs,
+  setPerfIntervalMs,
   setAutostart,
   setCloseToTray,
   setBackground,
@@ -27,6 +27,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { AboutPanel } from "./components/AboutPanel";
 import { BackgroundLayer } from "./components/BackgroundLayer";
 import { PerformancePanel } from "./components/PerformancePanel";
+import { AiPanel } from "./components/AiPanel";
 import { Toast, type ToastHandle } from "./components/Toast";
 import appIcon from "./assets/app-icon.png";
 
@@ -60,7 +61,15 @@ const FEATURES = [
     title: "隐私操作",
     subtitle: "空闲时自动保护屏幕，防止窥屏",
     detail:
-      "开启后，电脑空闲超过设定时间（默认 60 秒），自动最小化所有窗口、隐藏桌面图标与任务栏并静音；您一操作鼠标或键盘，立即全部还原。",
+      "开启后，电脑空闲超过设定时间（默认 1 分钟），自动最小化所有窗口、隐藏桌面图标与任务栏并静音；您一操作鼠标或键盘，立即全部还原。",
+  },
+  {
+    id: "ai",
+    icon: "✳",
+    title: "AI 助手",
+    subtitle: "接入你自己的 OpenAI API Key 进行对话",
+    detail:
+      "配置你自己的 OpenAI API Key 与模型名后即可使用：流式回复、多轮上下文、可随时停止生成或清空对话。Key 经系统加密保存，仅在你发送消息时访问 api.openai.com。",
   },
 ];
 
@@ -92,7 +101,8 @@ function App({ initial }: AppProps) {
       privacyIdleSecs: 60,
       privacyActive: false,
       autohideEnabled: false,
-      autohideIdleSecs: 60,
+      perfIntervalMs: 1000,
+      aiModel: "gpt-4o-mini",
       theme: "system",
       animating: false,
       autostart: false,
@@ -245,21 +255,25 @@ function App({ initial }: AppProps) {
     try {
       const next = await setAutohideEnabled(enabled);
       setState(next);
-      toastRef.current?.show(enabled ? "任务栏自动隐藏已开启" : "任务栏自动隐藏已关闭");
+      toastRef.current?.show(enabled ? "任务栏自动隐藏已开启（立即隐藏）" : "任务栏自动隐藏已关闭");
     } catch (err) {
       console.error("切换任务栏自动隐藏失败", err);
       toastRef.current?.show("操作失败，请稍后重试");
     }
   }, []);
 
-  const handleAutohideIdle = useCallback(async (secs: number) => {
+  const handlePerfInterval = useCallback(async (ms: number) => {
     try {
-      const next = await setAutohideIdleSecs(secs);
+      const next = await setPerfIntervalMs(ms);
       setState(next);
     } catch (err) {
-      console.error("更新任务栏自动隐藏空闲时间失败", err);
+      console.error("更新性能监控刷新间隔失败", err);
       toastRef.current?.show("操作失败，请稍后重试");
     }
+  }, []);
+
+  const handleAiModelChange = useCallback((model: string) => {
+    setState((s) => ({ ...s, aiModel: model }));
   }, []);
 
   const handleBackgroundChange = useCallback(async (next: BackgroundSettings) => {
@@ -311,6 +325,7 @@ function App({ initial }: AppProps) {
   const isTaskbar = activeId === FEATURES[1].id;
   const isPerformance = activeId === FEATURES[2].id;
   const isPrivacy = activeId === FEATURES[3].id;
+  const isAi = activeId === FEATURES[4].id;
   const featureOn = isTaskbar
     ? state.taskbarTransparent
     : isPerformance
@@ -404,7 +419,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.10.3</div>
+          <div className="sidebar-version">v0.11.0</div>
           </div>
         </aside>
 
@@ -414,7 +429,11 @@ function App({ initial }: AppProps) {
               enabled={state.performanceMonitor}
               busy={busyToggle}
               onChange={handleToggle}
+              intervalMs={state.perfIntervalMs}
+              onIntervalChange={handlePerfInterval}
             />
+          ) : isAi ? (
+            <AiPanel model={state.aiModel} onModelChange={handleAiModelChange} />
           ) : (
             <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
               <div className="detail-hero">
@@ -453,7 +472,9 @@ function App({ initial }: AppProps) {
                 ? "仅本机采集 · 不联网 · 关闭后立即停止采样"
                 : isPrivacy
                   ? "空闲超时自动保护 · 操作鼠标或键盘立即还原 · 退出应用自动恢复"
-                  : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
+                  : isAi
+                    ? "仅在你发送消息时访问 api.openai.com · Key 本地加密保存 · 对话不落盘"
+                    : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
 
@@ -469,8 +490,6 @@ function App({ initial }: AppProps) {
           onTaskbarTransparentChange={handleTaskbarTransparent}
           autohideEnabled={state.autohideEnabled}
           onAutohideChange={handleAutohideEnabled}
-          autohideIdleSecs={state.autohideIdleSecs}
-          onAutohideIdleChange={handleAutohideIdle}
           privacyIdleSecs={state.privacyIdleSecs}
           onPrivacyIdleChange={handlePrivacyIdle}
           background={backgroundOf(state)}

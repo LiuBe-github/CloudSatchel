@@ -1,7 +1,14 @@
 // 与 Tauri 后端（Rust command）通信的桥接层
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppState, BackgroundSettings, PerfSnapshot, ThemeMode } from "../vite-env";
+import type {
+  AiConfig,
+  AiMessage,
+  AppState,
+  BackgroundSettings,
+  PerfSnapshot,
+  ThemeMode,
+} from "../vite-env";
 
 /** 应用是否运行在 Tauri 内（否则为浏览器预览模式） */
 export const inTauri = (): boolean =>
@@ -16,7 +23,8 @@ const FALLBACK_STATE: AppState = {
   privacyIdleSecs: 60,
   privacyActive: false,
   autohideEnabled: false,
-  autohideIdleSecs: 60,
+  perfIntervalMs: 1000,
+  aiModel: "gpt-4o-mini",
   theme: "system",
   animating: false,
   autostart: false,
@@ -70,14 +78,70 @@ export async function setAutohideEnabled(enabled: boolean): Promise<AppState> {
   return (await invoke<AppState>("set_autohide_enabled", { enabled })) as AppState;
 }
 
-export async function setAutohideIdleSecs(secs: number): Promise<AppState> {
-  if (!inTauri()) return fallback({ autohideIdleSecs: secs });
-  return (await invoke<AppState>("set_autohide_idle_secs", { secs })) as AppState;
+export async function setPerfIntervalMs(ms: number): Promise<AppState> {
+  if (!inTauri()) return fallback({ perfIntervalMs: ms });
+  return (await invoke<AppState>("set_perf_interval_ms", { ms })) as AppState;
 }
 
 export async function getPerfSnapshot(): Promise<PerfSnapshot | null> {
   if (!inTauri()) return null;
   return (await invoke<PerfSnapshot | null>("get_perf_snapshot")) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// AI 助手（FR-15）
+// ---------------------------------------------------------------------------
+
+export async function getAiConfig(): Promise<AiConfig> {
+  if (!inTauri()) return { hasKey: false, model: "gpt-4o-mini" };
+  return (await invoke<AiConfig>("get_ai_config", { model: "" })) as AiConfig;
+}
+
+export async function saveAiKey(apiKey: string): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("save_ai_key", { apiKey });
+}
+
+export async function setAiModel(model: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ aiModel: model });
+  return (await invoke<AppState>("set_ai_model", { model })) as AppState;
+}
+
+export async function aiSend(model: string, messages: AiMessage[]): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("ai_send", { model, messages });
+}
+
+export function aiStop(): void {
+  if (!inTauri()) return;
+  void invoke("ai_stop");
+}
+
+/** 订阅 AI 流式输出增量 */
+export function onAiChunk(cb: (text: string) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<string>("ai-chunk", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 订阅 AI 回复结束 */
+export function onAiDone(cb: () => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen("ai-done", () => cb());
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 订阅 AI 错误 */
+export function onAiError(cb: (message: string) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<string>("ai-error", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
 }
 
 export async function setTheme(mode: ThemeMode): Promise<AppState> {
