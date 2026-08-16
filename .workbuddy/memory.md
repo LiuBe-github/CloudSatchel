@@ -59,6 +59,16 @@
     - Release 安装包：`CloudSatchel_0.10.0_x64-setup.exe`（npm run release 一键构建+重命名）
     - GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.0
     - tag：v0.10.0（gh CLI + GH_TOKEN 提取自凭据管理器，与 v0.9.0 同流程）
+- 2026-08-15 修复任务栏自动隐藏 + 空闲时间最小 10 秒：v0.10.1
+  - 根因：Win11 25H2（build 26200）上 `SHAppBarMessage(ABM_SETSTATE, ABS_AUTOHIDE)` 仅改变状态位、任务栏视觉不隐藏（PowerShell 实测 GETSTATE 0→1 但窗口可见）
+  - 修复：taskbar.rs 改用 `ShowWindow(SW_HIDE/SW_SHOW)` 控制所有任务栏窗口（主+副）；边缘弹出/移开再隐藏由 privacy.rs 轮询鼠标位置实现（50ms tick，移开 1.5s 后重新隐藏，任务栏矩形外扩 4px）
+  - privacy.rs 轮询改为 50ms tick：每 tick 做边缘检测，每 20 tick（1 秒）做空闲检测与全屏检测
+  - 空闲时间最小可设值 IDLE_CLAMP_MIN 30→10 秒（前端 RangeRow min 同步）
+  - prefs::load() 容忍 UTF-8 BOM（PowerShell 等第三方工具写入 settings.json 会导致 serde 解析失败、设置静默丢失——自动化测试发现的真实问题）
+  - taskbar::ensure_restored() 扩展：启动时恢复异常退出残留的隐藏任务栏（仅恢复 SW_HIDE 的窗口，不影响系统 autohide 设置）
+  - 自动化验证（等系统空闲后实测）：空闲 10 秒隐藏 ✓ 鼠标移到底部弹出 ✓ 移开 1.5s 再隐藏 ✓ 启动自修复 ✓
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.1
+  - 版本号同步 v0.10.1（含根 package.json）
 
 ## 关键工程约定
 
