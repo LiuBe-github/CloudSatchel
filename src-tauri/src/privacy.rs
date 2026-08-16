@@ -33,13 +33,12 @@ use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
-use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetCursorPos, GetWindow, GetWindowLongW, GetWindowPlacement,
-    GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MoveWindow, ShowWindow,
-    GWL_EXSTYLE, GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED,
-    WS_EX_TOOLWINDOW, WINDOWPLACEMENT,
+    GetWindowRect, IsIconic, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE, GW_OWNER,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED, WS_EX_TOOLWINDOW,
+    WINDOWPLACEMENT,
 };
 
 use crate::dlog;
@@ -416,13 +415,7 @@ unsafe extern "system" fn collect_cb(hwnd: HWND, lparam: LPARAM) -> i32 {
     if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0 {
         return 1;
     }
-    // 跳过云笈自身进程的窗口
-    let mut pid = 0u32;
-    GetWindowThreadProcessId(hwnd, &mut pid);
-    if pid == GetCurrentProcessId() {
-        return 1;
-    }
-    // 跳过桌面与任务栏体系
+    // 桌面与任务栏体系（云笈自身窗口不跳过：隐私保护时连同主窗口一起最小化）
     let mut buf = [0u16; 128];
     let n = GetClassNameW(hwnd, buf.as_mut_ptr(), 128);
     if n > 0 {

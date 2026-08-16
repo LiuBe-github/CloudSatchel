@@ -22,8 +22,9 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FindWindowW, GetClassNameW, GetWindowRect, IsWindowVisible, SetWindowPos,
-    ShowWindow, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
+    EnumWindows, FindWindowW, GetClassNameW, GetWindowLongW, GetWindowRect, IsWindowVisible,
+    SetLayeredWindowAttributes, SetWindowLongW, SetWindowPos, ShowWindow, GWL_EXSTYLE, LWA_ALPHA,
+    SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WS_EX_LAYERED,
 };
 
 const ACCENT_DISABLED: u32 = 0;
@@ -352,90 +353,52 @@ pub fn set_autohide(enabled: bool) -> bool {
 
 struct AnimTarget {
     hwnd: HWND,
-    x: i32,
-    y0: i32,
-    y1: i32,
-    w: i32,
-    h: i32,
+    /// 动画前的原始扩展样式（动画结束恢复，避免影响透明引擎等其他设置）
+    orig_exstyle: i32,
 }
 
-/// 单轮滑动动画：hide=true 滑出所在显示器底部，false 滑回原位。
+/// 单轮透明度动画：hide=true 淡出（alpha 255→0 后 SW_HIDE），false 淡入（SW_SHOW 后 0→255）。
+///
+/// 注：曾用 SetWindowPos 位移动画，实测系统会把任务栏窗口强制拉回原位（Shell_TrayWnd
+/// 是系统管理的停靠窗口），位移帧完全无效，因此改用 WS_EX_LAYERED + LWA_ALPHA 渐变。
 fn animate_taskbars(hide: bool) {
     let mut targets: Vec<AnimTarget> = Vec::new();
     unsafe {
         for hwnd in taskbar_windows() {
-            let mut r = RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            };
-            if GetWindowRect(hwnd, &mut r) == 0 {
-                continue;
-            }
-            let w = r.right - r.left;
-            let h = r.bottom - r.top;
-            // 所在显示器的底部（隐藏目标：整体滑到屏幕下方）
-            let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let mut mi = MONITORINFO {
-                cbSize: size_of::<MONITORINFO>() as u32,
-                rcMonitor: RECT {
-                    left: 0,
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                },
-                rcWork: RECT {
-                    left: 0,
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                },
-                dwFlags: 0,
-            };
-            let bottom = if GetMonitorInfoW(mon, &mut mi) != 0 {
-                mi.rcMonitor.bottom
-            } else {
-                r.bottom
-            };
-            let (y0, y1) = if hide { (r.top, bottom) } else { (r.top, bottom - h) };
-            // 显示前确保窗口可见（从屏外或隐藏状态恢复）
             if !hide && IsWindowVisible(hwnd) == 0 {
                 ShowWindow(hwnd, SW_SHOW);
             }
-            targets.push(AnimTarget {
-                hwnd,
-                x: r.left,
-                y0,
-                y1,
-                w,
-                h,
-            });
+            let orig_exstyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            SetWindowLongW(hwnd, GWL_EXSTYLE, orig_exstyle | WS_EX_LAYERED as i32);
+            targets.push(AnimTarget { hwnd, orig_exstyle });
+        }
+        if targets.is_empty() {
+            return;
         }
 
-        // 步进动画（12 步 × 12ms ≈ 144ms）
-        const STEPS: i32 = 12;
+        // alpha 渐变（16 步 × 10ms ≈ 160ms）
+        const STEPS: i32 = 16;
         for step in 0..=STEPS {
+            let alpha = if hide {
+                255 - 255 * step / STEPS
+            } else {
+                255 * step / STEPS
+            };
             for t in &targets {
-                let y = t.y0 + (t.y1 - t.y0) * step / STEPS;
-                SetWindowPos(
-                    t.hwnd,
-                    std::ptr::null_mut(),
-                    t.x,
-                    y,
-                    t.w,
-                    t.h,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
+                SetLayeredWindowAttributes(t.hwnd, 0, alpha as u8, LWA_ALPHA);
             }
-            std::thread::sleep(Duration::from_millis(12));
+            std::thread::sleep(Duration::from_millis(10));
         }
 
-        // 收尾：隐藏 → SW_HIDE；显示 → 已滑回原位
+        // 收尾：隐藏 → SW_HIDE；显示 → 已完全不透明
         if hide {
             for t in &targets {
                 ShowWindow(t.hwnd, SW_HIDE);
             }
+        }
+        // 恢复原始扩展样式（清除我们临时加的 WS_EX_LAYERED）
+        for t in &targets {
+            SetWindowLongW(t.hwnd, GWL_EXSTYLE, t.orig_exstyle);
         }
     }
 }
