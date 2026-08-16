@@ -77,6 +77,12 @@
   - 自动化实测：隐藏动画 ✓ 边缘弹出动画 ✓ 移开再隐藏 ✓（Phase A 全过）
   - 教训：自动化测试脚本超时/失败路径必须清理残留状态（曾因超时退出导致任务栏被隐藏残留，需手动 ShowWindow 恢复）；隐私触发会最小化用户全部窗口，测试需谨慎
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.2
+- 2026-08-15 任务栏透明度动画 + 隐私最小化云笈自身：v0.10.3
+  - 用户实测反馈：位移动画视觉上无效（生硬）、隐私操作未最小化云笈自身
+  - 根因实测：Shell_TrayWnd 是系统管理的停靠窗口，SetWindowPos 移动被系统强制拉回原位（top 恒定不变）→ 位移帧全部无效
+  - 修复：动画改为 WS_EX_LAYERED + LWA_ALPHA 透明度渐变（16 步 × 10ms ≈ 160ms，alpha 255↔0），隐藏收尾 SW_HIDE、显示先 SW_SHOW；动画前记录原始 exstyle，结束后恢复（避免影响透明引擎）
+  - 隐私操作 collect_cb 移除"跳过云笈自身进程"：保护时主窗口一并最小化（需求文档 FR-13 原写"跳过云笈自身窗口"，已按用户要求调整）
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.10.3
 
 ## 关键工程约定
 
