@@ -12,14 +12,18 @@
 use std::mem::size_of;
 
 use windows_sys::core::{s, w};
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows_sys::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
     HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FindWindowW, GetClassNameW, IsWindowVisible, ShowWindow, SW_HIDE, SW_SHOW,
+    EnumWindows, FindWindowW, GetClassNameW, GetWindowRect, IsWindowVisible, SetWindowPos,
+    ShowWindow, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
 };
 
 const ACCENT_DISABLED: u32 = 0;
@@ -230,8 +234,11 @@ pub fn restore() {
 //
 // 注：早期实现使用 SHAppBarMessage(ABM_SETSTATE, ABS_AUTOHIDE)。实测 Windows 11
 // 25H2（build 26200）上该调用只改变 AppBar 状态位，任务栏视觉上不隐藏，
-// 因此改为直接控制任务栏窗口可见性（ShowWindow），边缘弹出/再隐藏由
-// privacy.rs 的空闲轮询线程检测鼠标位置实现。不写注册表。
+// 因此改为直接控制任务栏窗口（滑动动画 + SW_HIDE/SW_SHOW），边缘弹出/再隐藏
+// 由 privacy.rs 的空闲轮询线程检测鼠标位置实现。不写注册表。
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 fn taskbar_hwnd() -> HWND {
     unsafe { FindWindowW(w!("Shell_TrayWnd"), std::ptr::null()) }
@@ -259,35 +266,183 @@ pub fn taskbar_windows() -> Vec<HWND> {
     list
 }
 
-/// 任务栏当前是否处于隐藏状态（主任务栏窗口不可见）
+/// 任务栏“期望”的隐藏状态（由 set_autohide 写入，动画线程按最新意图执行）
+static AUTOHIDE_EXPECTED: AtomicBool = AtomicBool::new(false);
+/// 动画线程是否正在运行
+static AUTOHIDE_ANIMATING: AtomicBool = AtomicBool::new(false);
+
+/// 任务栏当前是否处于隐藏状态（窗口不可见，或已完全滑出所在显示器底部）
 pub fn is_autohide() -> bool {
     let hwnd = taskbar_hwnd();
     if hwnd.is_null() {
         return false;
     }
-    unsafe { IsWindowVisible(hwnd) == 0 }
+    unsafe {
+        if IsWindowVisible(hwnd) == 0 {
+            return true;
+        }
+        let mut r = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetWindowRect(hwnd, &mut r) == 0 {
+            return false;
+        }
+        let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            rcMonitor: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            rcWork: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            dwFlags: 0,
+        };
+        if GetMonitorInfoW(mon, &mut mi) == 0 {
+            return false;
+        }
+        // 窗口整体在所在显示器底部下方 → 视为已隐藏
+        r.top >= mi.rcMonitor.bottom
+    }
 }
 
-/// 隐藏 / 恢复显示所有任务栏窗口（SW_HIDE / SW_SHOW）。
+/// 任务栏动画是否进行中（动画期间调用方应暂缓状态判断）
+pub fn is_animating() -> bool {
+    AUTOHIDE_ANIMATING.load(Ordering::SeqCst)
+}
+
+/// 动画式隐藏 / 恢复显示所有任务栏窗口（异步，不阻塞调用线程）。
 ///
-/// 隐藏后的边缘弹出与移开再隐藏由 privacy.rs 轮询鼠标位置完成；
+/// 隐藏：任务栏从所在显示器底部平滑滑出屏幕（约 144ms），随后 SW_HIDE；
+/// 显示：SW_SHOW 后平滑滑回原位。动画期间的新请求按最新意图在完成后继续执行。
 /// 不写注册表、不改系统「自动隐藏任务栏」设置开关。
 pub fn set_autohide(enabled: bool) -> bool {
-    let hwnds = taskbar_windows();
-    if hwnds.is_empty() {
+    if taskbar_windows().is_empty() {
         return false;
     }
-    unsafe {
-        for hwnd in hwnds {
-            ShowWindow(hwnd, if enabled { SW_HIDE } else { SW_SHOW });
-        }
+    AUTOHIDE_EXPECTED.store(enabled, Ordering::SeqCst);
+    if AUTOHIDE_ANIMATING.swap(true, Ordering::SeqCst) {
+        return true; // 动画线程会在当前动画完成后按最新意图继续执行
     }
+    std::thread::spawn(|| {
+        loop {
+            let hide = AUTOHIDE_EXPECTED.load(Ordering::SeqCst);
+            if hide == is_autohide() {
+                // 二次确认：期间可能又收到新请求
+                if AUTOHIDE_EXPECTED.load(Ordering::SeqCst) == is_autohide() {
+                    break;
+                }
+            } else {
+                animate_taskbars(hide);
+            }
+        }
+        AUTOHIDE_ANIMATING.store(false, Ordering::SeqCst);
+    });
     true
 }
 
+struct AnimTarget {
+    hwnd: HWND,
+    x: i32,
+    y0: i32,
+    y1: i32,
+    w: i32,
+    h: i32,
+}
+
+/// 单轮滑动动画：hide=true 滑出所在显示器底部，false 滑回原位。
+fn animate_taskbars(hide: bool) {
+    let mut targets: Vec<AnimTarget> = Vec::new();
+    unsafe {
+        for hwnd in taskbar_windows() {
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(hwnd, &mut r) == 0 {
+                continue;
+            }
+            let w = r.right - r.left;
+            let h = r.bottom - r.top;
+            // 所在显示器的底部（隐藏目标：整体滑到屏幕下方）
+            let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                rcMonitor: RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                rcWork: RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                dwFlags: 0,
+            };
+            let bottom = if GetMonitorInfoW(mon, &mut mi) != 0 {
+                mi.rcMonitor.bottom
+            } else {
+                r.bottom
+            };
+            let (y0, y1) = if hide { (r.top, bottom) } else { (r.top, bottom - h) };
+            // 显示前确保窗口可见（从屏外或隐藏状态恢复）
+            if !hide && IsWindowVisible(hwnd) == 0 {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+            targets.push(AnimTarget {
+                hwnd,
+                x: r.left,
+                y0,
+                y1,
+                w,
+                h,
+            });
+        }
+
+        // 步进动画（12 步 × 12ms ≈ 144ms）
+        const STEPS: i32 = 12;
+        for step in 0..=STEPS {
+            for t in &targets {
+                let y = t.y0 + (t.y1 - t.y0) * step / STEPS;
+                SetWindowPos(
+                    t.hwnd,
+                    std::ptr::null_mut(),
+                    t.x,
+                    y,
+                    t.w,
+                    t.h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            std::thread::sleep(Duration::from_millis(12));
+        }
+
+        // 收尾：隐藏 → SW_HIDE；显示 → 已滑回原位
+        if hide {
+            for t in &targets {
+                ShowWindow(t.hwnd, SW_HIDE);
+            }
+        }
+    }
+}
+
 /// 启动自检：清理旧版注册表实验遗留、结束异常退出残留的引擎进程，
-/// 并恢复异常退出时残留的隐藏任务栏（仅恢复被 SW_HIDE 的任务栏窗口，
-/// 不影响系统自身的「自动隐藏任务栏」设置——该设置下窗口仍为可见标志）。
+/// 并恢复异常退出时残留的隐藏任务栏（仅恢复被隐藏/滑出屏幕的任务栏窗口，
+/// 不影响系统自身的「自动隐藏任务栏」设置——该设置下窗口仍为可见且在原位）。
 pub fn ensure_restored() {
     unsafe {
         if let Some(hkey) = open_advanced_key() {
@@ -297,6 +452,45 @@ pub fn ensure_restored() {
         for hwnd in taskbar_windows() {
             if IsWindowVisible(hwnd) == 0 {
                 ShowWindow(hwnd, SW_SHOW);
+            }
+            // 滑出屏幕残留（动画中途强杀）：移回所在显示器底部原位
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(hwnd, &mut r) == 0 {
+                continue;
+            }
+            let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                rcMonitor: RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                rcWork: RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                dwFlags: 0,
+            };
+            if GetMonitorInfoW(mon, &mut mi) != 0 && r.top >= mi.rcMonitor.bottom {
+                let h = r.bottom - r.top;
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    r.left,
+                    mi.rcMonitor.bottom - h,
+                    r.right - r.left,
+                    h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
             }
         }
     }

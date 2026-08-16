@@ -37,8 +37,8 @@ use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetCursorPos, GetWindow, GetWindowLongW, GetWindowPlacement,
-    GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE,
-    GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED,
+    GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MoveWindow, ShowWindow,
+    GWL_EXSTYLE, GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED,
     WS_EX_TOOLWINDOW, WINDOWPLACEMENT,
 };
 
@@ -203,8 +203,12 @@ fn poll_loop() {
         tick += 1;
         let cfg = *CFG.lock().unwrap();
 
-        // —— FR-14 边缘弹出 / 再隐藏（每 tick，约 50ms 响应）——
-        if cfg.autohide_enabled && !fullscreen && AUTOHIDE_APPLIED.load(Ordering::SeqCst) {
+        // —— FR-14 边缘弹出 / 再隐藏（每 tick，约 50ms 响应；动画期间暂缓）——
+        if cfg.autohide_enabled
+            && !fullscreen
+            && AUTOHIDE_APPLIED.load(Ordering::SeqCst)
+            && !taskbar::is_animating()
+        {
             let pos = cursor_pos();
             if in_taskbar_area(pos) {
                 // 鼠标在任务栏（或其边缘）：弹出显示
@@ -249,6 +253,7 @@ fn poll_loop() {
                         dlog::write("[privacy] autohide: fullscreen pause -> show");
                     }
                 } else if !AUTOHIDE_APPLIED.load(Ordering::SeqCst)
+                    && !taskbar::is_animating()
                     && u64::from(idle_ms) >= u64::from(cfg.autohide_idle_secs) * 1000
                 {
                     if taskbar::set_autohide(true) {
@@ -398,6 +403,10 @@ unsafe extern "system" fn collect_cb(hwnd: HWND, lparam: LPARAM) -> i32 {
 
     // 仅处理可见的顶层窗口
     if IsWindowVisible(hwnd) == 0 {
+        return 1;
+    }
+    // 触发前已最小化的窗口：不记录、不操作，恢复时保持原样（不弹出来）
+    if IsIconic(hwnd) != 0 {
         return 1;
     }
     // 跳过带 owner 的窗口（属于其他窗口）与工具窗口（WS_EX_TOOLWINDOW）
