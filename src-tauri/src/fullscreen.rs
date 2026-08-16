@@ -24,8 +24,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW, IsZoomed,
 };
 
+/// 全屏覆盖面积比阈值（≥98% 视为全屏，见 is_fullscreen_now）
+
 const MAX_LEN: usize = 256;
-const TOLERANCE_PX: i32 = 2;
 
 fn window_class(hwnd: HWND) -> String {
     if hwnd.is_null() {
@@ -125,10 +126,18 @@ pub fn is_fullscreen_now() -> bool {
         }
 
         let m = &mi.rcMonitor;
-        wr.left <= m.left + TOLERANCE_PX
-            && wr.top <= m.top + TOLERANCE_PX
-            && wr.right >= m.right - TOLERANCE_PX
-            && wr.bottom >= m.bottom - TOLERANCE_PX
+        // 覆盖面积比判定（鲁棒）：窗口与显示器相交面积 ≥ 98% 即视为全屏。
+        // 相比逐边容差更可靠：无边框全屏 / DPI 缩放下 1~2px 偏移不影响；
+        // 最大化窗口只覆盖工作区（不盖任务栏区域），面积比约 95% 不会误判。
+        let mw = (m.right - m.left).max(1);
+        let mh = (m.bottom - m.top).max(1);
+        let iw = wr.right.min(m.right) - wr.left.max(m.left);
+        let ih = wr.bottom.min(m.bottom) - wr.top.max(m.top);
+        if iw <= 0 || ih <= 0 {
+            return false;
+        }
+        let ratio = (iw as i64 * ih as i64) as f64 / (mw as i64 * mh as i64) as f64;
+        ratio >= 0.98
     }
 }
 

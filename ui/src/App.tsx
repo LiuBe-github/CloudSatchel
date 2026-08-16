@@ -40,12 +40,12 @@ const FEATURES = [
     detail: "开启后，双击桌面空白区域即可隐藏所有桌面图标；再次双击恢复显示。双击图标本身仍会正常打开应用，不会误触发。",
   },
   {
-    id: "transparent-taskbar",
+    id: "taskbar",
     icon: "▭",
-    title: "透明任务栏",
-    subtitle: "让任务栏背景消失，只保留任务按钮",
+    title: "任务栏",
+    subtitle: "透明任务栏与自动隐藏，让任务栏更沉浸",
     detail:
-      "开启后任务栏背景消失，只保留任务按钮，与壁纸融为一体（约 1~2 秒生效）；关闭后恢复系统默认外观。",
+      "透明任务栏让任务栏背景消失、与壁纸融为一体（全屏时自动恢复不透明）；自动隐藏开启后任务栏立即隐藏，鼠标移到屏幕下边界弹出。两个开关互不影响、各自持久化，退出应用自动恢复。",
   },
   {
     id: "performance-monitor",
@@ -166,20 +166,15 @@ function App({ initial }: AppProps) {
     if (busyToggle) return;
     setBusyToggle(true);
     try {
-      const isTaskbar = activeId === FEATURES[1].id;
       const isPerformance = activeId === FEATURES[2].id;
       const isPrivacy = activeId === FEATURES[3].id;
-      const next = isTaskbar
-        ? await setTaskbarTransparent(!state.taskbarTransparent)
-        : isPerformance
-          ? await setPerformanceMonitor(!state.performanceMonitor)
-          : isPrivacy
-            ? await setPrivacyEnabled(!state.privacyEnabled)
-            : await setEnabled(!state.enabled);
+      const next = isPerformance
+        ? await setPerformanceMonitor(!state.performanceMonitor)
+        : isPrivacy
+          ? await setPrivacyEnabled(!state.privacyEnabled)
+          : await setEnabled(!state.enabled);
       setState(next);
-      if (isTaskbar) {
-        toastRef.current?.show(next.taskbarTransparent ? "任务栏已透明化" : "已恢复系统默认任务栏");
-      } else if (isPerformance) {
+      if (isPerformance) {
         toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
       } else if (isPrivacy) {
         toastRef.current?.show(
@@ -198,7 +193,7 @@ function App({ initial }: AppProps) {
     } finally {
       setBusyToggle(false);
     }
-  }, [busyToggle, state.enabled, state.taskbarTransparent, state.performanceMonitor, state.privacyEnabled, activeId]);
+  }, [busyToggle, state.enabled, state.performanceMonitor, state.privacyEnabled, activeId]);
 
   const handleTheme = useCallback(
     async (mode: ThemeMode) => {
@@ -326,28 +321,22 @@ function App({ initial }: AppProps) {
   const isPerformance = activeId === FEATURES[2].id;
   const isPrivacy = activeId === FEATURES[3].id;
   const isAi = activeId === FEATURES[4].id;
-  const featureOn = isTaskbar
-    ? state.taskbarTransparent
-    : isPerformance
-      ? state.performanceMonitor
-      : isPrivacy
-        ? state.privacyEnabled
-        : state.enabled;
-  const stateHint = isTaskbar
-    ? state.taskbarTransparent
-      ? "任务栏 · 当前已透明"
-      : "任务栏 · 当前为系统默认"
-    : isPerformance
-      ? state.performanceMonitor
-        ? "性能监控 · 当前已开启"
-        : "性能监控 · 当前已关闭"
-      : isPrivacy
-        ? state.privacyActive
-          ? "隐私操作 · 已触发保护，操作鼠标或键盘后自动还原"
-          : "隐私操作 · 空闲超过设定时间自动触发"
-        : state.iconsHidden
-          ? "桌面图标 · 当前已隐藏"
-          : "桌面图标 · 当前已显示";
+  const featureOn = isPerformance
+    ? state.performanceMonitor
+    : isPrivacy
+      ? state.privacyEnabled
+      : state.enabled;
+  const stateHint = isPerformance
+    ? state.performanceMonitor
+      ? "性能监控 · 当前已开启"
+      : "性能监控 · 当前已关闭"
+    : isPrivacy
+      ? state.privacyActive
+        ? "隐私操作 · 已触发保护，操作鼠标或键盘后自动还原"
+        : "隐私操作 · 空闲超过设定时间自动触发"
+      : state.iconsHidden
+        ? "桌面图标 · 当前已隐藏"
+        : "桌面图标 · 当前已显示";
 
   return (
     <div className={`app-shell${maximized ? " maximized" : ""}`}>
@@ -419,7 +408,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.11.0</div>
+          <div className="sidebar-version">v0.11.1</div>
           </div>
         </aside>
 
@@ -434,6 +423,47 @@ function App({ initial }: AppProps) {
             />
           ) : isAi ? (
             <AiPanel model={state.aiModel} onModelChange={handleAiModelChange} />
+          ) : isTaskbar ? (
+            <div className="detail-card noise-bg animate-scale-in">
+              <div className="detail-hero">
+                <div className="detail-icon">{feature.icon}</div>
+                <div className="detail-titles">
+                  <h1 className="detail-title">{feature.title}</h1>
+                  <p className="detail-subtitle">{feature.subtitle}</p>
+                </div>
+              </div>
+
+              <div className="detail-rule" />
+
+              <div className="setting-row">
+                <div className="setting-row-text">
+                  <div className="setting-row-title">透明任务栏</div>
+                  <div className="setting-row-desc">
+                    任务栏背景消失，与壁纸融为一体；全屏或云笈最大化时自动恢复不透明
+                  </div>
+                </div>
+                <Switch
+                  checked={state.taskbarTransparent}
+                  onChange={() => handleTaskbarTransparent(!state.taskbarTransparent)}
+                  disabled={busyToggle}
+                />
+              </div>
+              <div className="setting-row">
+                <div className="setting-row-text">
+                  <div className="setting-row-title">任务栏自动隐藏</div>
+                  <div className="setting-row-desc">
+                    开启后立即隐藏；鼠标移到屏幕下边界弹出，移开再隐藏
+                  </div>
+                </div>
+                <Switch
+                  checked={state.autohideEnabled}
+                  onChange={() => handleAutohideEnabled(!state.autohideEnabled)}
+                  disabled={busyToggle}
+                />
+              </div>
+
+              <p className="detail-note">{feature.detail}</p>
+            </div>
           ) : (
             <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
               <div className="detail-hero">
@@ -467,7 +497,7 @@ function App({ initial }: AppProps) {
           <div className="detail-footer">
             <span className="hint-icon">␣</span>
             {isTaskbar
-              ? "任务栏背景消失 · 退出应用自动恢复"
+              ? "透明与自动隐藏互不影响 · 均不写注册表 · 退出应用自动恢复"
               : isPerformance
                 ? "仅本机采集 · 不联网 · 关闭后立即停止采样"
                 : isPrivacy
@@ -486,10 +516,6 @@ function App({ initial }: AppProps) {
           onAutostartChange={handleAutostart}
           closeToTray={state.closeToTray}
           onCloseToTrayChange={handleCloseToTray}
-          taskbarTransparent={state.taskbarTransparent}
-          onTaskbarTransparentChange={handleTaskbarTransparent}
-          autohideEnabled={state.autohideEnabled}
-          onAutohideChange={handleAutohideEnabled}
           privacyIdleSecs={state.privacyIdleSecs}
           onPrivacyIdleChange={handlePrivacyIdle}
           background={backgroundOf(state)}

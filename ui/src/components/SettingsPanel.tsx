@@ -11,10 +11,6 @@ interface SettingsPanelProps {
   onAutostartChange: (enabled: boolean) => void;
   closeToTray: boolean;
   onCloseToTrayChange: (enabled: boolean) => void;
-  taskbarTransparent: boolean;
-  onTaskbarTransparentChange: (enabled: boolean) => void;
-  autohideEnabled: boolean;
-  onAutohideChange: (enabled: boolean) => void;
   privacyIdleSecs: number;
   onPrivacyIdleChange: (secs: number) => void;
   background: BackgroundSettings;
@@ -59,10 +55,6 @@ export function SettingsPanel({
   onAutostartChange,
   closeToTray,
   onCloseToTrayChange,
-  taskbarTransparent,
-  onTaskbarTransparentChange,
-  autohideEnabled,
-  onAutohideChange,
   privacyIdleSecs,
   onPrivacyIdleChange,
   background,
@@ -188,24 +180,6 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-section">
-          <div className="settings-label">任务栏</div>
-          <div className="setting-row">
-            <div className="setting-row-text">
-              <div className="setting-row-title">透明任务栏</div>
-              <div className="setting-row-desc">让任务栏背景消失，与壁纸融为一体；退出应用自动恢复</div>
-            </div>
-            <Switch checked={taskbarTransparent} onChange={() => onTaskbarTransparentChange(!taskbarTransparent)} />
-          </div>
-          <div className="setting-row">
-            <div className="setting-row-text">
-              <div className="setting-row-title">任务栏自动隐藏</div>
-              <div className="setting-row-desc">开启后任务栏立即隐藏；鼠标移到屏幕下边界弹出，移开再隐藏（不写注册表）</div>
-            </div>
-            <Switch checked={autohideEnabled} onChange={() => onAutohideChange(!autohideEnabled)} />
-          </div>
-        </div>
-
-        <div className="settings-section">
           <div className="settings-label">隐私操作</div>
           <div className="setting-row">
             <div className="setting-row-text">
@@ -258,7 +232,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.11.0</span>
+          <span className="settings-version">云笈 · v0.11.1</span>
         </div>
       </div>
     </div>
