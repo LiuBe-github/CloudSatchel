@@ -10,6 +10,8 @@
 #![allow(non_snake_case)]
 
 use std::mem::size_of;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use windows_sys::core::{s, w};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
@@ -239,7 +241,6 @@ pub fn restore() {
 // 由 privacy.rs 的空闲轮询线程检测鼠标位置实现。不写注册表。
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 fn taskbar_hwnd() -> HWND {
     unsafe { FindWindowW(w!("Shell_TrayWnd"), std::ptr::null()) }
@@ -258,8 +259,31 @@ unsafe extern "system" fn enum_taskbars(hwnd: HWND, lparam: LPARAM) -> i32 {
     1
 }
 
-/// 所有任务栏窗口（主任务栏 + 多显示器副任务栏）
+/// 任务栏窗口句柄缓存：EnumWindows 全量枚举开销大（privacy 边缘检测每 50ms 调用一次），
+/// 任务栏窗口在 Explorer 存活期间不变，TTL 5 秒刷新一次即可（覆盖 Explorer 重启场景）。
+/// 句柄存为 isize（保证 Send，供 static Mutex 使用）。
+static TASKBAR_CACHE: Mutex<Option<(Instant, Vec<isize>)>> = Mutex::new(None);
+const TASKBAR_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// 所有任务栏窗口（主任务栏 + 多显示器副任务栏），带 5 秒缓存
 pub fn taskbar_windows() -> Vec<HWND> {
+    if let Ok(mut cache) = TASKBAR_CACHE.lock() {
+        let now = Instant::now();
+        if let Some((at, list)) = cache.as_ref() {
+            if now.duration_since(*at) < TASKBAR_CACHE_TTL {
+                return list.iter().map(|&h| h as HWND).collect();
+            }
+        }
+        let mut list: Vec<isize> = Vec::new();
+        let mut raw: Vec<HWND> = Vec::new();
+        unsafe {
+            EnumWindows(Some(enum_taskbars), &mut raw as *mut Vec<HWND> as LPARAM);
+        }
+        list.extend(raw.iter().map(|&h| h as isize));
+        *cache = Some((now, list.clone()));
+        return list.into_iter().map(|h| h as HWND).collect();
+    }
+    // 锁竞争兜底：直接枚举
     let mut list: Vec<HWND> = Vec::new();
     unsafe {
         EnumWindows(Some(enum_taskbars), &mut list as *mut Vec<HWND> as LPARAM);

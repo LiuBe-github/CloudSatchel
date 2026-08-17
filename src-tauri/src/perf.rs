@@ -146,6 +146,13 @@ struct Sampler {
     prev_net_at: Option<Instant>,
     physical_cores: Option<usize>,
     nvml: Option<nvml_wrapper::Nvml>,
+    // —— 准静态明细缓存（温度/频率/进程数/线程数等按约 1 秒刷新，避免 200ms 档重复重计算）——
+    detail_ticks: u32,
+    cached_process_count: usize,
+    cached_thread_count: usize,
+    cached_temperature: Option<f32>,
+    cached_current_mhz: Option<f64>,
+    cached_base_mhz: Option<f64>,
 }
 
 impl Sampler {
@@ -161,6 +168,28 @@ impl Sampler {
             prev_net_at: None,
             physical_cores,
             nvml,
+            detail_ticks: 0,
+            cached_process_count: 0,
+            cached_thread_count: 0,
+            cached_temperature: None,
+            cached_current_mhz: None,
+            cached_base_mhz: None,
+        }
+    }
+
+    /// 按采样间隔刷新准静态明细：200ms 档每 5 轮（1s）、500ms 档每 2 轮（1s）、1000ms 档每轮
+    fn maybe_refresh_details(&mut self) {
+        let interval = PERF_INTERVAL_MS.load(Ordering::SeqCst);
+        let every = (1000 / interval).max(1) as u32;
+        self.detail_ticks += 1;
+        if self.detail_ticks == 1 || self.detail_ticks % every == 0 {
+            let (pc, tc) = process_thread_counts();
+            self.cached_process_count = pc;
+            self.cached_thread_count = tc;
+            self.cached_temperature = cpu_temperature();
+            let (cur, base) = cpu_frequencies();
+            self.cached_current_mhz = cur;
+            self.cached_base_mhz = base;
         }
     }
 
@@ -183,6 +212,7 @@ impl Sampler {
     }
 
     fn sample_cpu(&mut self) -> CpuMetrics {
+        self.maybe_refresh_details();
         let mut idle = windows_sys::Win32::Foundation::FILETIME {
             dwLowDateTime: 0,
             dwHighDateTime: 0,
@@ -218,21 +248,19 @@ impl Sampler {
         self.prev_kernel = kernel;
         self.prev_user = user;
 
-        let (current_mhz, base_mhz) = cpu_frequencies();
         let logical_processor_count = unsafe {
             windows_sys::Win32::System::Threading::GetActiveProcessorCount(u16::MAX) as usize
         };
-        let (process_count, thread_count) = process_thread_counts();
 
         CpuMetrics {
             usage,
-            temperature: cpu_temperature(),
-            current_frequency_mhz: current_mhz,
-            base_frequency_mhz: base_mhz,
+            temperature: self.cached_temperature,
+            current_frequency_mhz: self.cached_current_mhz,
+            base_frequency_mhz: self.cached_base_mhz,
             core_count: self.physical_cores,
             logical_processor_count,
-            process_count,
-            thread_count,
+            process_count: self.cached_process_count,
+            thread_count: self.cached_thread_count,
         }
     }
 
