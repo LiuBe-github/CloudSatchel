@@ -112,6 +112,12 @@
   - 请求 URL = normalize_base_url(base_url) + /chat/completions（去尾斜杠，非法回落默认）；curl 实测 DeepSeek 双端点（/ 与 /v1）均正确接收
   - 新增单元测试 base_url_normalization_and_chat_url；错误文案通用化
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.3
+- 2026-08-15 下拉框与 AI 界面主题色适配：v0.11.4
+  - 用户反馈：隐私操作空闲时间下拉、AI 界面深色主题下可读性差
+  - 根因：styles.css 追加的 select-box / AI 面板样式误用**未定义变量**（--color-card / --color-line / --color-paper-soft 不在 :root），永远回落白底 + color:inherit 继承浅色文字 → 白底浅字
+  - 修复：全部改用已定义主题变量（--color-paper 系列 / --color-ink 系列 / --color-bamboo）；option 加 background/color 跟随主题；输入框/文本域/错误条/bubble 一并适配
+  - 教训：新增样式必须使用 :root 已定义的主题变量，禁止引入未定义变量（CSS var 未定义时静默用 fallback）
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.4
 
 ## 关键工程约定
 
