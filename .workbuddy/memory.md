@@ -100,6 +100,12 @@
   - 全屏检测 is_fullscreen_now 改为覆盖面积比 ≥98% 判定（原逐边 2px 容差在无边框全屏/DPI 缩放偏移下漏检）；最大化窗口约 95% 不误判；实测真实全屏窗口进出均正确触发
   - 功能列表第 2 项改为「任务栏」卡片：透明任务栏 + 自动隐藏两个开关并列（各自持久化）；设置面板「任务栏」分组移除（统一在功能列表操作）；handleToggle 移除 taskbar 分支（卡片独立 Switch）
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.1
+- 2026-08-15 AI Key 401 排查修复：v0.11.2
+  - 用户反馈：真实 Key 填进去 401。实测假 Key 请求 OpenAI：请求构造正确（Bearer 头正常送达），OpenAI 返回 "Incorrect API key provided: sk-xxx...xxxx"（含掩码）
+  - 修复 1：save_key 改为清除所有空白字符（clean_key，粘贴换行/空格不再破坏 Key）
+  - 修复 2：非 2xx 错误读取响应体并展示 OpenAI error.message（含 Key 掩码便于对比，不含完整 Key）；load_key 记长度日志
+  - 已知边界：仅支持 OpenAI 官方接口（api.openai.com），第三方平台 Key 必 401；自定义 base URL 在需求文档第 10 节迭代建议 8
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.2
 
 ## 关键工程约定
 
