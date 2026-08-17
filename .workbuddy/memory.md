@@ -131,6 +131,13 @@
   - CheckMenuItem（勾选项）的 set_checked 在 CheckMenuItem 上（普通 MenuItem 没有）；with_id 第 5 参为初始 checked
   - 勾选双向同步：persist 统一调 tray::update_checks；setup 后按恢复状态初始化
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.12.0
+- 2026-08-15 修复 TranslucentTB 误弹「已更新，请重启 Windows」：v0.12.1
+  - 用户反馈：新机器开启透明任务栏后 TranslucentTB 一直弹窗要求更新重启
+  - 根因：TranslucentTB 每次启动把引擎目录 DLL 复制到 %TEMP%\TranslucentTB（update_existing，仅当源比目标新）；目标被 explorer 锁定（异常退出残留）→ 复制失败 → 误判「已更新」弹窗
+  - 原 align_dll_timestamps_with_temp 仅当 temp 副本存在且字节一致时压时间戳，覆盖不全
+  - 修复：释放的引擎文件统一 stamp_fixed 为 2000-01-01 UTC（fs::File::set_modified）——源永远不新于任何 temp 副本，永不触发复制、永不弹窗；内容变化（字节不同）时保留新时间戳（真更新需重启）
+  - 实测：开启透明后引擎 DLL/EXE 时间戳均为 2000/1/1 8:00（+08）
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.12.1（创建时遇 GitHub API 网络 EOF，重试成功）
 
 ## 关键工程约定
 
