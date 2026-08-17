@@ -106,6 +106,12 @@
   - 修复 2：非 2xx 错误读取响应体并展示 OpenAI error.message（含 Key 掩码便于对比，不含完整 Key）；load_key 记长度日志
   - 已知边界：仅支持 OpenAI 官方接口（api.openai.com），第三方平台 Key 必 401；自定义 base URL 在需求文档第 10 节迭代建议 8
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.2
+- 2026-08-15 AI 助手支持自定义 BaseURL：v0.11.3
+  - 用户反馈：DeepSeek Key（模型 DSV4）填进去 401——根因：应用固定请求 OpenAI 官方接口，DeepSeek Key 必被拒
+  - 配置区新增「接口地址」输入框（与 API Key/模型名并列），持久化 ai_base_url（默认 https://api.openai.com/v1）
+  - 请求 URL = normalize_base_url(base_url) + /chat/completions（去尾斜杠，非法回落默认）；curl 实测 DeepSeek 双端点（/ 与 /v1）均正确接收
+  - 新增单元测试 base_url_normalization_and_chat_url；错误文案通用化
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.3
 
 ## 关键工程约定
 
