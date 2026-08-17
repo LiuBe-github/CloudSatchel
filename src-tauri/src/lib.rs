@@ -32,12 +32,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 // 应用状态
 // ---------------------------------------------------------------------------
 
-struct AppState {
-    enabled: Mutex<bool>,        // 功能是否激活
-    icons_hidden: Mutex<bool>,   // 图标当前是否隐藏
+/// 应用状态（pub(crate)：托盘模块需要读写开关字段以支持快捷开关）
+pub(crate) struct AppState {
+    pub(crate) enabled: Mutex<bool>,     // 功能是否激活
+    pub(crate) icons_hidden: Mutex<bool>, // 图标当前是否隐藏
     animating: Mutex<bool>,      // 是否正在动画
     pending_toggle: Mutex<bool>, // 动画期间到达的切换请求（动画结束后立即执行，保证每次双击都不被吞）
-    taskbar_transparent: Mutex<bool>, // 任务栏是否透明
+    pub(crate) taskbar_transparent: Mutex<bool>, // 任务栏是否透明
     fullscreen_active: Mutex<bool>, // 当前前台是否有应用处于全屏（用于暂时取消任务栏透明）
     taskbar_applied: Mutex<bool>, // 任务栏“实际”当前是否已透明（用户意图与全屏叠加后的结果）
     theme: Mutex<String>,        // light / dark / system
@@ -45,10 +46,10 @@ struct AppState {
     close_to_tray: Mutex<bool>,  // 关闭到托盘：true=点击关闭最小化到托盘；false=点击关闭直接退出
     background: Mutex<background::BackgroundSettings>, // 背景图片设置
     performance_monitor: Mutex<bool>, // 主机性能监控是否激活
-    privacy_enabled: Mutex<bool>,    // 隐私操作（FR-13）是否激活
+    pub(crate) privacy_enabled: Mutex<bool>, // 隐私操作（FR-13）是否激活
     privacy_idle_secs: Mutex<u32>,   // 隐私操作空闲触发时间（秒）
     privacy_active: Mutex<bool>,     // 隐私操作当前是否已触发（运行时状态，不入盘）
-    autohide_enabled: Mutex<bool>,   // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
+    pub(crate) autohide_enabled: Mutex<bool>, // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
     perf_interval_ms: Mutex<u32>,    // 性能监控采样间隔（毫秒）
     ai_model: Mutex<String>,         // AI 助手模型名
     ai_base_url: Mutex<String>,      // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
@@ -164,6 +165,13 @@ fn persist(state: &AppState) {
     if let Err(e) = prefs::save(&prefs) {
         dlog::write(&format!("[prefs] 保存设置失败: {e}"));
     }
+    // 托盘快捷开关勾选双向同步（开关变化后立即更新，任意一侧切换另一侧一致）
+    tray::update_checks(
+        *state.enabled.lock().unwrap(),
+        *state.taskbar_transparent.lock().unwrap(),
+        *state.autohide_enabled.lock().unwrap(),
+        *state.privacy_enabled.lock().unwrap(),
+    );
 }
 
 /// 串行化任务栏视觉切换：用户开关与全屏切换可能同时触发，避免 stop/start 竞态
@@ -759,8 +767,15 @@ pub fn run() {
             quit_app
         ])
         .setup(move |app| {
-            // 系统托盘（后台驻留入口）
+            // 系统托盘（后台驻留入口 + 功能快捷开关）
             tray::setup_tray(app)?;
+            // 托盘勾选状态按恢复的开关初始化（FR-06 扩展）
+            tray::update_checks(
+                *state.enabled.lock().unwrap(),
+                *state.taskbar_transparent.lock().unwrap(),
+                *state.autohide_enabled.lock().unwrap(),
+                *state.privacy_enabled.lock().unwrap(),
+            );
             // 自动应用上次退出前的功能效果（开关已从 settings.json 恢复）
             if *state.enabled.lock().unwrap() {
                 hooks::start();
