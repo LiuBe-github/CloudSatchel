@@ -51,6 +51,7 @@ struct AppState {
     autohide_enabled: Mutex<bool>,   // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
     perf_interval_ms: Mutex<u32>,    // 性能监控采样间隔（毫秒）
     ai_model: Mutex<String>,         // AI 助手模型名
+    ai_base_url: Mutex<String>,      // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
 }
 
 impl Default for AppState {
@@ -74,6 +75,7 @@ impl Default for AppState {
             autohide_enabled: Mutex::new(false),
             perf_interval_ms: Mutex::new(1000),
             ai_model: Mutex::new("gpt-4o-mini".to_string()),
+            ai_base_url: Mutex::new(ai::DEFAULT_BASE_URL.to_string()),
         }
     }
 }
@@ -95,6 +97,7 @@ struct Snapshot {
     autohide_enabled: bool,
     perf_interval_ms: u32,
     ai_model: String,
+    ai_base_url: String,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -121,6 +124,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
+        ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -148,6 +152,7 @@ fn persist(state: &AppState) {
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
+        ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -488,6 +493,27 @@ fn set_ai_model(app: AppHandle, state: State<std::sync::Arc<AppState>>, model: S
 }
 
 #[tauri::command]
+fn set_ai_base_url(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    base_url: String,
+) -> Snapshot {
+    *state.ai_base_url.lock().unwrap() = ai::normalize_base_url(&base_url);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+#[tauri::command]
+fn get_ai_config(state: State<std::sync::Arc<AppState>>) -> ai::AiConfig {
+    ai::get_ai_config(
+        state.ai_model.lock().unwrap().clone(),
+        state.ai_base_url.lock().unwrap().clone(),
+    )
+}
+
+#[tauri::command]
 fn set_background(
     app: AppHandle,
     state: State<std::sync::Arc<AppState>>,
@@ -690,6 +716,7 @@ pub fn run() {
     *state.autohide_enabled.lock().unwrap() = prefs.autohide_enabled;
     *state.perf_interval_ms.lock().unwrap() = prefs.perf_interval_ms;
     *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
+    *state.ai_base_url.lock().unwrap() = prefs.ai_base_url.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -715,8 +742,9 @@ pub fn run() {
             set_autohide_enabled,
             set_perf_interval_ms,
             set_ai_model,
+            set_ai_base_url,
             get_perf_snapshot,
-            ai::get_ai_config,
+            get_ai_config,
             ai::save_ai_key,
             ai::ai_send,
             ai::ai_stop,

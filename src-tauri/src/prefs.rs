@@ -29,6 +29,9 @@ fn default_perf_interval() -> u32 {
 fn default_ai_model() -> String {
     "gpt-4o-mini".to_string()
 }
+fn default_ai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -69,6 +72,8 @@ pub struct AppPrefs {
     pub perf_interval_ms: u32, // 性能监控采样间隔（毫秒）
     #[serde(default = "default_ai_model")]
     pub ai_model: String, // AI 助手模型名（API Key 单独 DPAPI 加密存储）
+    #[serde(default = "default_ai_base_url")]
+    pub ai_base_url: String, // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -100,6 +105,7 @@ impl Default for AppPrefs {
             autohide_enabled: false,
             perf_interval_ms: default_perf_interval(),
             ai_model: default_ai_model(),
+            ai_base_url: default_ai_base_url(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

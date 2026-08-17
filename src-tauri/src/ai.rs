@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 const KEY_FILE_NAME: &str = "ai-key.bin";
-const API_URL: &str = "https://api.openai.com/v1/chat/completions";
+/// 默认接口地址（OpenAI 官方，OpenAI 兼容）
+pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// 请求总超时（秒）：超过即中止并提示
 const TIMEOUT_SECS: u64 = 60;
 
@@ -33,6 +34,22 @@ pub struct AiMessage {
 pub struct AiConfig {
     pub has_key: bool,
     pub model: String,
+    pub base_url: String,
+}
+
+/// 规范化接口地址：去首尾空白、去末尾斜杠；非法（空 / 非 http(s)）回落到默认值
+pub fn normalize_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/').to_string();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed
+    } else {
+        DEFAULT_BASE_URL.to_string()
+    }
+}
+
+/// 拼接聊天补全请求地址：base_url + /chat/completions
+pub fn chat_url(base_url: &str) -> String {
+    format!("{}/chat/completions", normalize_base_url(base_url))
 }
 
 /// 当前进行中的对话任务（「停止生成」时 abort）
@@ -146,11 +163,11 @@ pub fn load_key() -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 /// 查询 AI 配置状态（不返回 Key 明文）
-#[tauri::command]
-pub fn get_ai_config(model: String) -> AiConfig {
+pub fn get_ai_config(model: String, base_url: String) -> AiConfig {
     AiConfig {
         has_key: has_key(),
         model,
+        base_url: normalize_base_url(&base_url),
     }
 }
 
@@ -165,11 +182,16 @@ pub fn save_ai_key(api_key: String) -> Result<(), String> {
 /// 事件：`ai-chunk`(String 增量) / `ai-done`(null) / `ai-error`(String 错误信息)。
 /// 停止生成：`ai_stop` 中止进行中的任务（Abortable 取消后请求一并断开）。
 #[tauri::command]
-pub async fn ai_send(app: AppHandle, model: String, messages: Vec<AiMessage>) -> Result<(), String> {
+pub async fn ai_send(
+    app: AppHandle,
+    base_url: String,
+    model: String,
+    messages: Vec<AiMessage>,
+) -> Result<(), String> {
     let (handle, registration) = AbortHandle::new_pair();
     *ABORT_HANDLE.lock().unwrap() = Some(handle);
 
-    let fut = stream_chat(app.clone(), model, messages);
+    let fut = stream_chat(app.clone(), base_url, model, messages);
     let result = Abortable::new(fut, registration).await;
     *ABORT_HANDLE.lock().unwrap() = None;
 
@@ -191,9 +213,10 @@ pub fn ai_stop() {
     }
 }
 
-/// 实际执行 OpenAI 流式对话（被 Abortable 包裹，可被 ai_stop 中止）
+/// 实际执行 OpenAI 兼容流式对话（被 Abortable 包裹，可被 ai_stop 中止）
 async fn stream_chat(
     app: AppHandle,
+    base_url: String,
     model: String,
     messages: Vec<AiMessage>,
 ) -> Result<(), String> {
@@ -209,8 +232,9 @@ async fn stream_chat(
         "stream": true,
     });
 
+    let url = chat_url(&base_url);
     let resp = client
-        .post(API_URL)
+        .post(&url)
         .bearer_auth(&key)
         .json(&body)
         .send()
@@ -219,7 +243,7 @@ async fn stream_chat(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        // 读取 OpenAI 返回的错误详情（如 "Incorrect API key provided: sk-xxx...xxxx"），
+        // 读取服务端返回的错误详情（如 "Incorrect API key provided: sk-xxx...xxxx"），
         // 便于用户对比掩码确认是否填错 Key；不含完整 Key 与对话内容
         let detail = resp
             .text()
@@ -239,7 +263,10 @@ async fn stream_chat(
         } else if status.as_u16() == 429 {
             "请求过于频繁（429），请稍后再试".to_string()
         } else {
-            format!("OpenAI 接口返回错误（HTTP {}）", status.as_u16())
+            match detail {
+                Some(d) => format!("接口返回错误（HTTP {}）：{d}", status.as_u16()),
+                None => format!("接口返回错误（HTTP {}）", status.as_u16()),
+            }
         };
         return Err(msg);
     }
@@ -295,7 +322,7 @@ fn friendly_net_error(e: &reqwest::Error) -> String {
     if e.is_timeout() {
         format!("请求超时（超过 {TIMEOUT_SECS} 秒无响应）")
     } else if e.is_connect() {
-        "无法连接到 api.openai.com，请检查网络".to_string()
+        "无法连接到接口地址，请检查网络与 BaseURL 配置".to_string()
     } else {
         format!("网络请求失败: {e}")
     }
@@ -328,5 +355,31 @@ mod tests {
         );
         assert_eq!(clean_key("sk-abc"), "sk-abc");
         assert!(clean_key("  \n\t ").is_empty());
+    }
+
+    /// BaseURL 规范化与请求地址拼接（支持 DeepSeek 等 OpenAI 兼容服务）
+    #[test]
+    fn base_url_normalization_and_chat_url() {
+        assert_eq!(
+            chat_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/chat/completions"
+        );
+        assert_eq!(
+            chat_url("https://api.deepseek.com/v1/"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        // 非法输入回落默认 OpenAI 官方
+        assert_eq!(
+            chat_url("  "),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_base_url("ftp://bad"),
+            "https://api.openai.com/v1"
+        );
     }
 }

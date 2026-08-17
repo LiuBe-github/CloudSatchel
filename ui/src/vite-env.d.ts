@@ -25,6 +25,7 @@ export interface AppState {
   autohideEnabled: boolean; // 任务栏自动隐藏是否激活（开启即隐藏）
   perfIntervalMs: number; // 性能监控采样间隔（毫秒）
   aiModel: string; // AI 助手模型名
+  aiBaseUrl: string; // AI 助手接口地址（OpenAI 兼容）
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
@@ -46,6 +47,7 @@ export interface AiMessage {
 export interface AiConfig {
   hasKey: boolean;
   model: string;
+  baseUrl: string;
 }
 
 export interface CpuMetrics {

@@ -69,7 +69,7 @@ const FEATURES = [
     title: "AI 助手",
     subtitle: "接入你自己的 OpenAI API Key 进行对话",
     detail:
-      "配置你自己的 OpenAI API Key 与模型名后即可使用：流式回复、多轮上下文、可随时停止生成或清空对话。Key 经系统加密保存，仅在你发送消息时访问 api.openai.com。",
+      "配置你自己的接口地址、API Key 与模型名后即可使用（支持 OpenAI 及兼容服务）：流式回复、多轮上下文、可随时停止生成或清空对话。Key 经系统加密保存，仅在你发送消息时访问所配置的接口。",
   },
 ];
 
@@ -103,6 +103,7 @@ function App({ initial }: AppProps) {
       autohideEnabled: false,
       perfIntervalMs: 1000,
       aiModel: "gpt-4o-mini",
+      aiBaseUrl: "https://api.openai.com/v1",
       theme: "system",
       animating: false,
       autostart: false,
@@ -271,6 +272,10 @@ function App({ initial }: AppProps) {
     setState((s) => ({ ...s, aiModel: model }));
   }, []);
 
+  const handleAiBaseUrlChange = useCallback((baseUrl: string) => {
+    setState((s) => ({ ...s, aiBaseUrl: baseUrl }));
+  }, []);
+
   const handleBackgroundChange = useCallback(async (next: BackgroundSettings) => {
     try {
       const s = await setBackground(next);
@@ -408,7 +413,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.11.2</div>
+          <div className="sidebar-version">v0.11.3</div>
           </div>
         </aside>
 
@@ -422,7 +427,12 @@ function App({ initial }: AppProps) {
               onIntervalChange={handlePerfInterval}
             />
           ) : isAi ? (
-            <AiPanel model={state.aiModel} onModelChange={handleAiModelChange} />
+            <AiPanel
+              model={state.aiModel}
+              baseUrl={state.aiBaseUrl}
+              onModelChange={handleAiModelChange}
+              onBaseUrlChange={handleAiBaseUrlChange}
+            />
           ) : isTaskbar ? (
             <div className="detail-card noise-bg animate-scale-in">
               <div className="detail-hero">
@@ -503,7 +513,7 @@ function App({ initial }: AppProps) {
                 : isPrivacy
                   ? "空闲超时自动保护 · 操作鼠标或键盘立即还原 · 退出应用自动恢复"
                   : isAi
-                    ? "仅在你发送消息时访问 api.openai.com · Key 本地加密保存 · 对话不落盘"
+                    ? "仅在你发送消息时访问你配置的接口地址 · Key 本地加密保存 · 对话不落盘"
                     : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>

@@ -25,6 +25,7 @@ const FALLBACK_STATE: AppState = {
   autohideEnabled: false,
   perfIntervalMs: 1000,
   aiModel: "gpt-4o-mini",
+  aiBaseUrl: "https://api.openai.com/v1",
   theme: "system",
   animating: false,
   autostart: false,
@@ -93,8 +94,10 @@ export async function getPerfSnapshot(): Promise<PerfSnapshot | null> {
 // ---------------------------------------------------------------------------
 
 export async function getAiConfig(): Promise<AiConfig> {
-  if (!inTauri()) return { hasKey: false, model: "gpt-4o-mini" };
-  return (await invoke<AiConfig>("get_ai_config", { model: "" })) as AiConfig;
+  if (!inTauri()) {
+    return { hasKey: false, model: "gpt-4o-mini", baseUrl: "https://api.openai.com/v1" };
+  }
+  return (await invoke<AiConfig>("get_ai_config")) as AiConfig;
 }
 
 export async function saveAiKey(apiKey: string): Promise<void> {
@@ -107,9 +110,18 @@ export async function setAiModel(model: string): Promise<AppState> {
   return (await invoke<AppState>("set_ai_model", { model })) as AppState;
 }
 
-export async function aiSend(model: string, messages: AiMessage[]): Promise<void> {
+export async function setAiBaseUrl(baseUrl: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ aiBaseUrl: baseUrl });
+  return (await invoke<AppState>("set_ai_base_url", { baseUrl })) as AppState;
+}
+
+export async function aiSend(
+  baseUrl: string,
+  model: string,
+  messages: AiMessage[],
+): Promise<void> {
   if (!inTauri()) return;
-  await invoke("ai_send", { model, messages });
+  await invoke("ai_send", { baseUrl, model, messages });
 }
 
 export function aiStop(): void {

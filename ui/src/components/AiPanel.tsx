@@ -8,23 +8,29 @@ import {
   onAiDone,
   onAiError,
   saveAiKey,
+  setAiBaseUrl,
   setAiModel,
 } from "../lib/bridge";
 
 interface AiPanelProps {
   /** 当前模型名（来自 AppState，持久化） */
   model: string;
+  /** 当前接口地址（来自 AppState，持久化） */
+  baseUrl: string;
   /** 保存模型名后回调更新全局状态 */
   onModelChange: (model: string) => void;
+  /** 保存接口地址后回调更新全局状态 */
+  onBaseUrlChange: (baseUrl: string) => void;
 }
 
 /** AI 助手对话页面（FR-15）：配置区 + 消息区 + 输入区 */
-export function AiPanel({ model, onModelChange }: AiPanelProps) {
+export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPanelProps) {
   const [hasKey, setHasKey] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [modelInput, setModelInput] = useState(model);
+  const [baseUrlInput, setBaseUrlInput] = useState(baseUrl);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -36,6 +42,7 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
     void getAiConfig().then((cfg) => {
       setHasKey(cfg.hasKey);
       setModelInput(cfg.model);
+      setBaseUrlInput(cfg.baseUrl);
     });
     const offChunk = onAiChunk((text) => {
       setMessages((prev) => {
@@ -69,7 +76,11 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
     setInput("");
     setGenerating(true);
     try {
-      await aiSend(modelInput.trim() || "gpt-4o-mini", history);
+      await aiSend(
+        baseUrlInput.trim() || "https://api.openai.com/v1",
+        modelInput.trim() || "gpt-4o-mini",
+        history,
+      );
     } catch (err) {
       setGenerating(false);
       setError(String(err));
@@ -92,6 +103,10 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
         await saveAiKey(apiKey);
         setHasKey(true);
         setApiKey("");
+      }
+      if (baseUrlInput.trim()) {
+        const next = await setAiBaseUrl(baseUrlInput.trim());
+        onBaseUrlChange(next.aiBaseUrl);
       }
       if (modelInput.trim()) {
         const next = await setAiModel(modelInput.trim());
@@ -143,6 +158,15 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
             </button>
           </div>
           <div className="ai-config-row">
+            <span className="ai-config-label">接口地址</span>
+            <input
+              value={baseUrlInput}
+              onChange={(e) => setBaseUrlInput(e.target.value)}
+              placeholder="https://api.openai.com/v1（OpenAI 兼容服务均可）"
+              spellCheck={false}
+            />
+          </div>
+          <div className="ai-config-row">
             <span className="ai-config-label">模型名</span>
             <input
               value={modelInput}
@@ -155,7 +179,7 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
             </button>
           </div>
           <div className="ai-config-note">
-            Key 经 Windows DPAPI 加密后保存在本机，仅请求 api.openai.com；对话内容不落盘
+            Key 经 Windows DPAPI 加密保存在本机，仅请求上方配置的接口地址（默认 OpenAI 官方）；对话内容不落盘
             {saved && <span className="ai-config-saved"> · 已保存 ✓</span>}
           </div>
         </div>
@@ -177,7 +201,7 @@ export function AiPanel({ model, onModelChange }: AiPanelProps) {
           <div className="ai-welcome">
             <div className="ai-welcome-title">AI 助手</div>
             <div className="ai-welcome-desc">
-              配置你自己的 OpenAI API Key 后即可开始对话；支持流式回复与多轮上下文，可随时停止生成或清空对话
+              配置接口地址与 API Key（支持 OpenAI 及兼容服务如 DeepSeek）后即可开始对话；支持流式回复与多轮上下文，可随时停止生成或清空对话
             </div>
           </div>
         )}
