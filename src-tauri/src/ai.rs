@@ -112,13 +112,18 @@ pub fn has_key() -> bool {
     key_path().is_file()
 }
 
+/// 清洗 API Key：去掉所有空白字符（防复制粘贴带入空格/换行破坏 Key）
+fn clean_key(api_key: &str) -> String {
+    api_key.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
 /// 加密保存 API Key（原子写入，磁盘无明文）
 pub fn save_key(api_key: &str) -> Result<(), String> {
-    let trimmed = api_key.trim();
-    if trimmed.is_empty() {
+    let cleaned = clean_key(api_key);
+    if cleaned.is_empty() {
         return Err("API Key 不能为空".to_string());
     }
-    let data = dpapi_encrypt(trimmed)?;
+    let data = dpapi_encrypt(&cleaned)?;
     let path = key_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -131,7 +136,9 @@ pub fn save_key(api_key: &str) -> Result<(), String> {
 /// 读取并解密 API Key
 pub fn load_key() -> Result<String, String> {
     let data = std::fs::read(key_path()).map_err(|e| format!("读取 Key 文件失败: {e}"))?;
-    dpapi_decrypt(&data)
+    let key = dpapi_decrypt(&data)?;
+    crate::dlog::write(&format!("[ai] key loaded: len={}", key.len()));
+    Ok(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -212,10 +219,25 @@ async fn stream_chat(
 
     if !resp.status().is_success() {
         let status = resp.status();
+        // 读取 OpenAI 返回的错误详情（如 "Incorrect API key provided: sk-xxx...xxxx"），
+        // 便于用户对比掩码确认是否填错 Key；不含完整 Key 与对话内容
+        let detail = resp
+            .text()
+            .await
+            .ok()
+            .and_then(|body| {
+                serde_json::from_str::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
+            })
+            .filter(|s| !s.is_empty());
         let msg = if status.as_u16() == 401 {
-            "API Key 无效（401 Unauthorized）".to_string()
+            match detail {
+                Some(d) => format!("API Key 无效（401）：{d}"),
+                None => "API Key 无效（401 Unauthorized）".to_string(),
+            }
         } else if status.as_u16() == 429 {
-            "请求过于频繁（429）".to_string()
+            "请求过于频繁（429），请稍后再试".to_string()
         } else {
             format!("OpenAI 接口返回错误（HTTP {}）", status.as_u16())
         };
@@ -295,5 +317,16 @@ mod tests {
         );
         let dec = dpapi_decrypt(&enc).expect("decrypt");
         assert_eq!(dec, key);
+    }
+
+    /// Key 清洗：去掉所有空白字符（粘贴带入的换行/空格不会破坏 Key）
+    #[test]
+    fn clean_key_removes_all_whitespace() {
+        assert_eq!(
+            clean_key(" sk-abc \ndef\tghi \n"),
+            "sk-abcdefghi"
+        );
+        assert_eq!(clean_key("sk-abc"), "sk-abc");
+        assert!(clean_key("  \n\t ").is_empty());
     }
 }
