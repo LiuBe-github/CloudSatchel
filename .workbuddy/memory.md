@@ -124,6 +124,13 @@
   - perf 静态明细降频：200ms 档下 process_thread_counts（Toolhelp 快照）/cpu_temperature（sysinfo 全量）/cpu_frequencies 每轮重算 → maybe_refresh_details 按 1 秒刷新缓存（every = 1000/interval）；动态指标（usage/内存/网络速率）每轮
   - 回归实测：自动隐藏立即生效/边缘弹出/移开再隐藏全过
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.5
+- 2026-08-15 托盘右键菜单功能快捷开关：v0.12.0
+  - FR-06 扩展：托盘菜单新增 4 个 CheckMenuItem（双击隐藏桌面图标/透明任务栏/自动隐藏任务栏/隐私操作），带勾选标记
+  - 点击切换复用同一套 set_* command：command 函数保持**普通 fn**，tray.rs 作为 lib.rs 子模块可直接调用 crate::set_enabled（父模块私有项对子模块可见）
+  - 经验：tauri::command 宏对 `pub fn` / `pub(crate) fn` 展开会报 __cmd__ 重复定义（E0255）——**command 必须保持普通 fn**；AppState 开关字段加 pub(crate)（实际子模块可见父私有，非必需但无害）
+  - CheckMenuItem（勾选项）的 set_checked 在 CheckMenuItem 上（普通 MenuItem 没有）；with_id 第 5 参为初始 checked
+  - 勾选双向同步：persist 统一调 tray::update_checks；setup 后按恢复状态初始化
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.12.0
 
 ## 关键工程约定
 
