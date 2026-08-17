@@ -118,6 +118,12 @@
   - 修复：全部改用已定义主题变量（--color-paper 系列 / --color-ink 系列 / --color-bamboo）；option 加 background/color 跟随主题；输入框/文本域/错误条/bubble 一并适配
   - 教训：新增样式必须使用 :root 已定义的主题变量，禁止引入未定义变量（CSS var 未定义时静默用 fallback）
   - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.4
+- 2026-08-15 性能优化：v0.11.5
+  - 任务栏窗口句柄缓存：privacy 边缘检测每 50ms 调 taskbar_windows() → EnumWindows 全窗口枚举（每秒 20 次）；改为 TASKBAR_CACHE 5 秒 TTL 缓存（句柄存 isize 保 Send），覆盖 Explorer 重启场景
+  - dlog 文件句柄缓存：每次写日志 open/close 文件 → Mutex<Option<File>> 复用
+  - perf 静态明细降频：200ms 档下 process_thread_counts（Toolhelp 快照）/cpu_temperature（sysinfo 全量）/cpu_frequencies 每轮重算 → maybe_refresh_details 按 1 秒刷新缓存（every = 1000/interval）；动态指标（usage/内存/网络速率）每轮
+  - 回归实测：自动隐藏立即生效/边缘弹出/移开再隐藏全过
+  - 已发布 GitHub Release：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.11.5
 
 ## 关键工程约定
 
