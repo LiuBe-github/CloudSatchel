@@ -126,6 +126,9 @@ fn engine_dir() -> PathBuf {
 /// 这里在内容一致（字节数相同）时把引擎目录文件的时间戳压到不晚于临时副本，
 /// 使 update_existing 判定为无需复制；内容不一致（真正的版本更新）则保留新时间戳，
 /// 让复制照常发生（此时确实需要重启资源管理器/系统才能生效）。
+///
+/// 注：v0.12.1 起所有释放文件统一设为固定旧时间戳（见 stamp_fixed），
+/// 本函数保留为内容一致场景的兜底对齐。
 fn align_dll_timestamps_with_temp(dir: &std::path::Path, name: &str) {
     let path = dir.join(name);
     let Ok(src_meta) = fs::metadata(&path) else {
@@ -148,9 +151,24 @@ fn align_dll_timestamps_with_temp(dir: &std::path::Path, name: &str) {
     }
 }
 
+/// 固定时间戳（2000-01-01 UTC）：
+/// 引擎文件时间戳固定为过去时间后，永远不“新于” TranslucentTB 的临时副本
+/// （`%TEMP%\TranslucentTB\`，复制时取当前时间），`update_existing` 永不触发复制，
+/// 彻底避免「源比目标新 → 复制被 explorer 锁定 → 误弹“已更新，请重启 Windows”」。
+fn stamp_fixed(path: &std::path::Path) {
+    let fixed = std::time::SystemTime::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_secs(946_684_800)); // 2000-01-01 00:00:00 UTC
+    if let Some(t) = fixed {
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(path) {
+            let _ = f.set_modified(t);
+        }
+    }
+}
+
 /// 释放内嵌的引擎文件（已存在且大小一致则跳过），并总是重写我们的配置。
-/// 注意：不要删除已释放的文件 —— 删除后下次会重新写入新时间戳，进而触发
+/// 注意：不要删除已释放的文件 —— 删除后下次会重新写入，进而触发
 /// TranslucentTB 的“已更新，请重启 Windows”误弹窗（见 align_dll_timestamps_with_temp）。
+/// 所有释放文件统一设置固定旧时间戳（stamp_fixed），从根上避免误弹窗。
 fn release_engine() -> bool {
     let dir = engine_dir();
     if fs::create_dir_all(&dir).is_err() {
@@ -167,9 +185,12 @@ fn release_engine() -> bool {
             .map(|m| m.len() == data.len() as u64)
             .unwrap_or(false);
         if up_to_date {
+            stamp_fixed(&path);
             align_dll_timestamps_with_temp(&dir, name);
         } else if fs::write(&path, data).is_err() {
             return false;
+        } else {
+            stamp_fixed(&path);
         }
     }
     fs::write(dir.join("settings.json"), SETTINGS_JSON).is_ok()

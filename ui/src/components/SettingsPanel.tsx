@@ -232,7 +232,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.12.0</span>
+          <span className="settings-version">云笈 · v0.12.1</span>
         </div>
       </div>
     </div>
