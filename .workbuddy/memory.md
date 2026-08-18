@@ -71,6 +71,9 @@
   - 面板精简：无 border、无外 box-shadow、inset 0 铺满，仅 inset 高光（inset 阴影窗口内渲染不裁剪）
   - 坑：tauri hwnd() 返回 windows crate HWND 元组结构体（解包 .0 为 *mut c_void 供 windows-sys）；PowerShell 批量改版本号时 Set-Content -Encoding UTF8 写 BOM 会破坏 JSON（用 [IO.File]::WriteAllText + UTF8Encoding($false)）
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.2
+- 2026-08-18 v0.16.3 音频面板重新打开不显示（用户反馈）
+  - bug：set_audio_panel_enabled(true) 只恢复数据采集，窗口仍处于关闭时的 hide 状态 → 补 show + unminimize
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.3
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -208,8 +211,8 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.2（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.2）
-- 工作区 git 干净，main 与远端同步（最后 commit `61f507e`）
+- 最新版本：v0.16.3（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.3）
+- 工作区 git 干净，main 与远端同步（最后 commit `4657e4a`）
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
