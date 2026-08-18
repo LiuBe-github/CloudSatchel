@@ -385,21 +385,40 @@ fn apply_rounded_corners(window: &tauri::WebviewWindow, radius_logical: f64) {
 /// （实测 EX_APPWINDOW=True），窗口会出现在 Alt+Tab / 任务视图里——
 /// 小面板与用户正在使用的应用（如 Photoshop）并列，观感诡异。
 /// 工具窗口样式使其从 Alt+Tab、任务栏中彻底消失。
+///
+/// 同时彻底去除窗口框架：
+/// - GWL_STYLE 清 WS_CAPTION/WS_SYSMENU/WS_BORDER/MIN/MAX 并置 WS_POPUP
+///   （wry 的 decorations:false 仅隐藏标题栏渲染但保留样式位，失焦时
+///   DWM 会按样式位绘制「非活动窗口框架」——实测复现）
+/// - DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED 禁用 DWM 非客户区渲染
 #[cfg(target_os = "windows")]
 fn make_tool_window(window: &tauri::WebviewWindow) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_BORDER,
+        WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
+        WS_SYSMENU,
     };
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
     let hwnd: *mut core::ffi::c_void = hwnd.0;
     unsafe {
+        // 样式：置 WS_POPUP 并清除所有框架相关位
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let new_style = (style
+            & !(WS_CAPTION | WS_SYSMENU | WS_BORDER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX))
+            | WS_POPUP;
+        if new_style != style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, new_style as isize);
+        }
+        // 扩展样式：工具窗口（不进 Alt+Tab / 任务视图）
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let new_ex = (ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
         if new_ex != ex {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex as isize);
+        }
+        if new_style != style || new_ex != ex {
             // 样式变更后通知系统重算（标题栏/任务栏归属）
             SetWindowPos(
                 hwnd,
@@ -411,6 +430,14 @@ fn make_tool_window(window: &tauri::WebviewWindow) {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
         }
+        // 禁用 DWM 非客户区渲染（彻底不绘制标题栏/边框，失焦也不出现）
+        let ncr_policy: i32 = 1; // DWMNCRP_DISABLED
+        let _ = windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            hwnd,
+            2, // DWMWA_NCRENDERING_POLICY
+            &ncr_policy as *const i32 as *const core::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
     }
 }
 
