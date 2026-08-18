@@ -379,6 +379,41 @@ fn apply_rounded_corners(window: &tauri::WebviewWindow, radius_logical: f64) {
     }
 }
 
+/// 把辅助窗口标记为「工具窗口」：加 WS_EX_TOOLWINDOW、清 WS_EX_APPWINDOW。
+///
+/// 目的：Tauri 2 的 skipTaskbar 在 Windows 上未设置 TOOLWINDOW 样式
+/// （实测 EX_APPWINDOW=True），窗口会出现在 Alt+Tab / 任务视图里——
+/// 小面板与用户正在使用的应用（如 Photoshop）并列，观感诡异。
+/// 工具窗口样式使其从 Alt+Tab、任务栏中彻底消失。
+#[cfg(target_os = "windows")]
+fn make_tool_window(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd: *mut core::ffi::c_void = hwnd.0;
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let new_ex = (ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+        if new_ex != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex as isize);
+            // 样式变更后通知系统重算（标题栏/任务栏归属）
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tauri Commands（前端 invoke 调用）
 // ---------------------------------------------------------------------------
@@ -1025,6 +1060,16 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
         }
 
         tick += 1;
+        // 每约 2 秒（25 个 80ms 周期）强制修复辅助窗口样式：
+        // wry/Tauri 在窗口 show 时会重置 exstyle（实测音频面板 show 后 EX_APPWINDOW 复现），
+        // 需周期确保 TOOLWINDOW 生效（不出现 Alt+Tab / 任务视图）
+        if tick % 25 == 0 {
+            for label in ["ai-popup", "audio-panel", "pet-window"] {
+                if let Some(win) = app.get_webview_window(label) {
+                    make_tool_window(&win);
+                }
+            }
+        }
         // 每约 320ms（4 个 80ms 周期）检查一次前台窗口是否全屏
         if tick % 4 == 0 {
             // 隐私操作「已触发」状态同步给前端（触发/恢复可能发生在 privacy 轮询线程）
@@ -1173,10 +1218,11 @@ pub fn run() {
             sync_idle(&state);
             privacy::start();
             let app_handle = app.handle().clone();
-            // 辅助窗口圆角裁剪（透明窗口消除矩形虚框边缘）
+            // 辅助窗口圆角裁剪 + 工具窗口样式（透明小窗不出现在 Alt+Tab / 任务视图）
             for label in ["ai-popup", "audio-panel", "pet-window"] {
                 if let Some(win) = app.get_webview_window(label) {
                     apply_rounded_corners(&win, 12.0);
+                    make_tool_window(&win);
                 }
             }
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
