@@ -22,6 +22,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use windows::ApplicationModel::AppInfo;
+use windows::core::HSTRING;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -57,12 +59,14 @@ pub struct MediaState {
     pub active: bool,
     /// 是否正在播放（暂停时为 false）
     pub playing: bool,
-    /// 播放应用名（标题前会带上前缀展示）
+    /// 播放应用名（人类可读，如 "Apple Music"；未知时为空串）
     pub app_name: String,
     /// 媒体标题
     pub title: String,
     /// 艺术家 / 作者
     pub artist: String,
+    /// 专辑名
+    pub album: String,
     /// 当前进度（秒）
     pub position_secs: f64,
     /// 总时长（秒）
@@ -87,6 +91,7 @@ impl MediaState {
             app_name: String::new(),
             title: String::new(),
             artist: String::new(),
+            album: String::new(),
             position_secs: 0.0,
             duration_secs: 0.0,
             prev_enabled: false,
@@ -194,8 +199,11 @@ fn read_current_session() -> MediaState {
 
         let title = props.Title()?.to_string();
         let artist = props.Artist()?.to_string();
-        // 应用名来自会话属性（可能为空；前端用「媒体会话」兜底）
-        let app_name = session.SourceAppUserModelId().unwrap_or_default().to_string();
+        let album = props.AlbumTitle()?.to_string();
+        // 应用名：AUMID → 人类可读显示名（如 AppleInc.AppleMusicWin_xxx!App → "Apple Music"）
+        let app_name = app_display_name(
+            &session.SourceAppUserModelId().unwrap_or_default().to_string(),
+        );
 
         Ok(MediaState {
             active: true,
@@ -203,6 +211,7 @@ fn read_current_session() -> MediaState {
             app_name,
             title,
             artist,
+            album,
             position_secs: position,
             duration_secs: end,
             prev_enabled: controls.IsPreviousEnabled().unwrap_or(false),
@@ -229,6 +238,26 @@ fn smtc_available() -> bool {
     GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
         .map(|op| op.get().is_ok())
         .unwrap_or(false)
+}
+
+/// 把 AUMID 转成人类可读的应用显示名。
+/// 打包应用（MSIX）可通过 AppInfo 查询 DisplayName（如 "Apple Music"）；
+/// 非打包应用（如 wmplayer）无 AUMID 显示名，回退为去掉 !App 后缀的原始串。
+fn app_display_name(aumid: &str) -> String {
+    if aumid.is_empty() {
+        return String::new();
+    }
+    if let Ok(info) = AppInfo::GetFromAppUserModelId(&HSTRING::from(aumid)) {
+        if let Ok(display) = info.DisplayInfo() {
+            if let Ok(name) = display.DisplayName() {
+                let s = name.to_string();
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
+    }
+    aumid.split('!').next().unwrap_or(aumid).to_string()
 }
 
 fn execute_control(action: &str) -> windows::core::Result<()> {

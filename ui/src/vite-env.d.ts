@@ -69,6 +69,7 @@ export interface MediaState {
   appName: string;
   title: string;
   artist: string;
+  album: string;
   positionSecs: number;
   durationSecs: number;
   prevEnabled: boolean;

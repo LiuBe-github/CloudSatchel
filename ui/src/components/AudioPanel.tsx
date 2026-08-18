@@ -17,6 +17,7 @@ interface MediaState {
   appName: string;
   title: string;
   artist: string;
+  album: string;
   positionSecs: number;
   durationSecs: number;
   prevEnabled: boolean;
@@ -113,6 +114,13 @@ export default function AudioPanel() {
       ? Math.min(100, (media.positionSecs / media.durationSecs) * 100)
       : 0;
 
+  // 副标题：歌手 · 专辑优先；无歌手信息时显示应用名
+  const subText = media?.artist
+    ? media.album
+      ? `${media.artist} · ${media.album}`
+      : media.artist
+    : media?.appName || (media?.active ? "媒体会话" : "");
+
   return (
     <div className={`audio-panel${show ? " visible" : ""}`}>
       <div className="audio-panel-drag" data-tauri-drag-region />
@@ -121,9 +129,8 @@ export default function AudioPanel() {
           <div className="audio-panel-title" title={media?.title || ""}>
             {media?.title || "未在播放"}
           </div>
-          <div className="audio-panel-sub">
-            {media?.appName || (media?.active ? "媒体会话" : "")}
-            {media?.artist ? ` · ${media.artist}` : ""}
+          <div className="audio-panel-sub" title={subText}>
+            {subText}
           </div>
         </div>
         <div className="audio-panel-controls">

@@ -1324,17 +1324,17 @@ button {
 }
 
 /* ============ AI 小窗（FR-17） ============ */
+/* 同音频面板：透明窗口上避免 backdrop-filter 的矩形边缘伪影 */
 .ai-popup-shell {
   position: fixed;
-  inset: 0;
+  inset: 10px;
   display: flex;
   flex-direction: column;
   background: color-mix(in srgb, var(--color-paper) 92%, transparent);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--color-paper-deep);
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
 }
 .ai-popup-titlebar {
   display: flex;
@@ -1413,17 +1413,18 @@ button {
 }
 
 /* ============ 音频识别面板（FR-18，液态玻璃） ============ */
+/* 注：透明窗口上 backdrop-filter 会留下矩形边缘伪影（虚框），
+   故用高不透明度背景 + 边框高光模拟玻璃感；面板四周留边距让 box-shadow 完整显示 */
 .audio-panel {
   position: fixed;
-  inset: 0;
+  inset: 12px;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-paper) 78%, transparent);
-  backdrop-filter: blur(14px);
-  border: 1px solid color-mix(in srgb, var(--color-paper-deep) 80%, transparent);
+  background: color-mix(in srgb, var(--color-paper) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-paper-deep) 82%, transparent);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 0.35s ease, transform 0.35s ease;
@@ -1744,8 +1745,7 @@ button {
   padding: 5px;
   border-radius: 12px;
   border: 1px solid var(--color-paper-deep);
-  background: color-mix(in srgb, var(--color-paper) 94%, transparent);
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--color-paper) 96%, transparent);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
   animation: pet-menu-in 0.15s ease;
 }
