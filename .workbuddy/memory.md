@@ -35,6 +35,11 @@
   - **音频识别从设置面板移入主界面功能列表**（第 6 项卡片，handleToggle 走 set_audio_panel_enabled）：SettingsPanel 删除「音频识别」分组与 props
   - 需求文档 v1.13：删除 4.16 虚拟桌宠章节（4.17→4.16、4.18→4.17），SC 场景/持久化表/NFR-35/技术架构/工程约定/第 8 节同步清理
   - 实测：功能列表 = 双击隐藏图标 | 任务栏 | 性能监控 | 隐私 | AI 助手 | 音频识别；窗口数 3（pet-window 已消失）
+  - GitHub Releases 仅保留 v0.17.0（其余 v0.7.0~v0.16.15 全部删除；git tag 完整保留）
+- 2026-08-18 README 按 colleague-skill 风格重写（v0.17.0 后）
+  - 学习 https://github.com/titanwings/colleague-skill 的 README 风格：居中标题区+态度引言+badges、排比场景铺垫、更新公告 blockquote、表格化特性/命令/结构、ASCII 界面布局、树状目录、底部署名
+  - 云笈 README 重写：六项功能表格、老板键/AI 小窗快捷键、音频面板 ASCII、技术架构（含辅助窗口完整配方）、更新日志补全至 v0.17.0
+  - 仓库无 LICENSE 文件（badges 不写 License）
 
 - 2026-08-18 v0.13.0 隐私老板键（FR-13 扩展）
   - 新模块 [src-tauri/src/hotkey.rs](src-tauri/src/hotkey.rs)：通用全局热键（RegisterHotKey + 独立消息循环线程 + MOD_NOREPEAT 防连发 + 注册结果回执），老板键与 AI 小窗共用
