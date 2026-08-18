@@ -85,6 +85,21 @@
   - v0.16.6 终案：GWL_STYLE 置 WS_POPUP + 清全部框架位 + DwmSetWindowAttribute(DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED)（windows-sys 需加 Win32_Graphics_Dwm feature）→ DWM 聚焦/失焦均不绘制任何非客户区；面板移除 inset 1px 内框线
   - 实测：style=0x94000000 popup=True caption/sysmenu/border=False；ex tool=True app=False
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6
+- 2026-08-18 v0.16.7 关闭 Win11 窗口边框（DWMWA_BORDER_COLOR=DWMWA_COLOR_NONE）——未解决（用户测试后仍有标题框）
+- 2026-08-18 v0.16.8 面板背景 100% 不透明（消除透出）——用户反馈「液态玻璃质感消失」
+- 2026-08-18 v0.16.9 Acrylic 毛玻璃（DWMWA_SYSTEMBACKDROP_TYPE=DWMSBT_ACRYLIC + DWMWA_COLOR）——用户反馈「无玻璃质感、直角、仍有标题框」；实测 DWM backdrop=3 生效但**acrylic 与 WebView2 透明背景不兼容**（内容整体渲染成灰色）
+- 2026-08-18 v0.16.10 移除 SetWindowRgn（acrylic 背景按窗口矩形渲染 region 裁剪不到=直角）→ DWM 系统圆角（DWMWA_WINDOW_CORNER_PREFERENCE=ROUND）；acrylic alpha 80%→60%——用户反馈「全灰、不是透明」
+- 2026-08-18 v0.16.11 放弃 acrylic（WebView2 不兼容=全灰根源）→ **CSS 玻璃拟态**（半透明渐变 82%/86% + 噪声纹理 + inset 高光描边，复刻主界面侧边栏质感）；新增 **WM_NCCALCSIZE 全客户区子类化**（install_nccalc_fix，老式 GWLP_WNDPROC 替换+转发）——毛玻璃质感回归 ✓，但「点击面板标题框仍弹出」
+- 2026-08-18 v0.16.12 排查日志：aux_wnd_proc 记录焦点/非客户区/命中测试消息+样式——**发现点击面板激活时样式曾被重置为 0x14CB0000**（含 WS_CAPTION）
+- 2026-08-18 v0.16.13 防御修复：aux_wnd_proc 每条消息处理后立即检查样式，被重置则毫秒级修复（节流 500ms）——本地模拟验证 FIXED 生效，**但用户测试后标题框依旧**
+- 2026-08-18 v0.16.14 **日志铁证**：用户真实点击面板时样式全程正常（popup 0x94000000 保持、无 WS_CAPTION、无 WM_NCPAINT、无 FIXED）——**标题框与窗口样式/系统非客户区完全无关**；新增激活瞬间自动截屏（save_window_shot 保存 BMP 到 %LOCALAPPDATA%\CloudSatchel\shot-activate-<tick>.bmp，激活后 300ms 抓 DWM 合成画面）
+  - 尚未解决：标题框之谜（见「待解决」）；本地无法复现（SetForegroundWindow 编程激活无标题框，仅用户真实鼠标点击出现）
+- 2026-08-18 v0.16.15 **音频面板标题框终案**（用户截图实锤：顶部灰带+「音频面板」文字，文字发虚=在内容**后面**透出）
+  - 根因：标题框 = 窗口**激活**时 DWM 合成到窗面非客户区的 caption；音频面板半透明背景（82%）让它透出。样式/NC 消息层面全程干净（v0.16.14 铁证），无法从样式层阻止 DWM 合成
+  - 修复：① tauri.conf.json 给 audio-panel / pet-window 加 `focusable: false`（tao 原生加 WS_EX_NOACTIVATE，点击永不激活 → 激活态 caption 永不合成；媒体面板/桌宠本就不需要键盘焦点，点击不抢焦点反而是更好的 UX）；② aux_wnd_proc 吞 WM_NCACTIVATE（返回 TRUE）/ WM_NCPAINT（返回 0）兜底（保护需要键盘的 ai-popup）；③ 移除激活截屏调试代码（save_window_shot 及 shot 线程）
+  - ai-popup 保留 focusable（输入框需要键盘），其内容背景不透明（.ai-panel background 实色）天然免疫透出
+  - 经验：**不需要键盘输入的透明辅助窗口一律 focusable:false**，从根本上避免激活 caption；这是 tao 自己的 flag 配方，不会被 wry show 重置（区别于手动 SetWindowLongPtr）
+  - 待用户实测确认（点击面板不再出现标题框；拖拽/按钮/双击菜单仍正常）
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -219,11 +234,20 @@
 - 需求文档第 10 节迭代建议剩余项：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化与导出 / 音频面板音量歌词 / 桌宠更多外观
 - 后续版本继续同步 Cargo、Tauri、前端 package 和 About 版本号
 
+## 待解决（进行中）
+
+**音频面板「点击弹出标题框」——v0.16.15 已修复，待用户实测确认**
+- 现象：用户真实鼠标点击音频面板时，窗口顶部出现灰色 caption 带（含「音频面板」标题文字，透在半透明背景后面）；失焦不出现；本地编程激活不出现
+- 根因：激活时 DWM 合成 caption 到窗面非客户区 + 面板 82% 半透明背景透出；样式/NC 消息层全程干净，无法从样式层阻止
+- 修复（v0.16.15）：audio-panel/pet-window `focusable:false`（WS_EX_NOACTIVATE，永不激活）+ aux_wnd_proc 吞 WM_NCACTIVATE/WM_NCPAINT + 移除截屏调试代码
+- 注意：v0.16.7~v0.16.15 均为本地调试版（未推送、未发布）；v0.16.7 的 GitHub Release 是草稿状态；git 有大量未提交改动；**用户确认修复后**再统一提交/推送/发布
+
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.6（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6）
-- 工作区 git 干净，main 与远端同步（最后 commit `c6ed017`）
+- 最新**已发布**版本：v0.16.6（https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6）
+- **本地调试版**（未推送/未发布）：v0.16.7 ~ v0.16.15（v0.16.15 = 音频面板标题框终案，待用户实测确认）；v0.16.7 GitHub Release 为草稿
+- git 状态：main 与远端同步至 `c6ed017`（v0.16.6）；v0.16.7+ 改动全部未提交（用户要求确认修复后再推送）
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
@@ -238,8 +262,9 @@
 - AI 助手对话（v0.11.x）：用户配置 DeepSeek/OpenAI 实测
 
 **遗留小问题**
-- dlog.rs 是临时调试日志（hooks 每点击写 FIRST/DBLCLK 多行），产品发布前应移除或加开关（记忆原话"确认修复后应移除"）
-- hooks-debug.log 会持续增长
+- dlog.rs 是临时调试日志（hooks 每点击写 FIRST/DBLCLK 多行 + aux 排查日志），产品发布前应移除或加开关（记忆原话"确认修复后应移除"）
+- hooks-debug.log 会持续增长；激活截屏调试已于 v0.16.15 移除，磁盘上旧 `%LOCALAPPDATA%\CloudSatchel\shot-activate-*.bmp` 可手动删除
+- dlog 坑：进程运行中若日志文件被外部删除重建，缓存文件句柄指向孤儿文件，可见文件恒 0 字节（v0.16.15 排查时遇到）；读日志前注意此假象，必要时重启应用重建句柄
 
 **已知技术坑（详见各版本记录）**
 - Win11 25H2：ABM_SETSTATE 不隐藏任务栏（用 ShowWindow+轮询）；SetWindowPos 移任务栏被系统拉回（动画用 alpha 渐变）
@@ -253,8 +278,10 @@
 - 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
 - 透明辅助窗口「虚框」终案：SetWindowRgn 圆角裁剪窗口区域 + shadow:false + 无 border/外阴影（见 v0.16.2）
 - Tauri 2 skipTaskbar 在 Windows 不设 WS_EX_TOOLWINDOW（Alt+Tab 仍显示）→ Rust 侧强制 TOOLWINDOW + 轮询兜底（wry show 会重置 exstyle，见 v0.16.4）
-- 无边框辅助窗口完整配方（v0.16.6）：WS_POPUP + 清 WS_CAPTION/SYSMENU/BORDER/MIN/MAX + WS_EX_TOOLWINDOW - APPWINDOW + DWMWA_NCRENDERING_POLICY=DISABLED + SetWindowRgn 圆角 + shadow:false
+- 无边框辅助窗口完整配方（v0.16.15 终案）：WS_POPUP + 清 WS_CAPTION/SYSMENU/BORDER/MIN/MAX + WS_EX_TOOLWINDOW - APPWINDOW + DWMWA_NCRENDERING_POLICY=DISABLED + DWMWA_BORDER_COLOR=NONE + DWMWA_WINDOW_CORNER_PREFERENCE=ROUND + shadow:false + WM_NCCALCSIZE 返回 0 + aux_wnd_proc 吞 WM_NCACTIVATE/WM_NCPAINT + **不需要键盘的窗口 focusable:false（WS_EX_NOACTIVATE，杜绝激活态 caption 合成；v0.16.15 标题框终案根因）**
+- **acrylic（DWMSBT_ACRYLIC）与 WebView2 透明背景不兼容**：WebView2 内容在 acrylic 窗口上整体渲染成灰色（v0.16.9/0.16.10 实测）→ 辅助窗口玻璃质感一律用 CSS 拟态（半透明渐变 + 噪声纹理 + inset 高光），不用系统 acrylic
 - CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）、窗口状态与 GetWindowRgn；PowerShell 写 JSON 用 [IO.File]::WriteAllText + UTF8Encoding($false) 防 BOM
+- 窗口排查套路：窗口子类化（GWLP_WNDPROC 替换+转发）记录 WM_ACTIVATE/NCPAINT/NCCALCSIZE/NCHITTEST + 样式快照；激活自动截屏（BitBlt 屏幕 DC→BMP）抓 DWM 合成画面（CopyFromScreen/PrintWindow 对透明合成窗口均不可靠，程序内截屏才有效）
 
 **新会话快速恢复**
 1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`

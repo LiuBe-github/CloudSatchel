@@ -334,47 +334,143 @@ fn activate_existing_window() {
     }
 }
 
-/// 把窗口区域裁剪为圆角（SetWindowRgn）——透明辅助窗口专用。
+/// WM_NCCALCSIZE 全客户区子类化：强制客户区 = 窗口区。
 ///
-/// 目的：Windows 上透明窗口即使内容带 CSS 圆角，窗口本身仍是矩形，
-/// 系统阴影 / 合成边缘可能在圆角外留下「虚框」痕迹；
-/// SetWindowRgn 直接把窗口区域切成圆角，圆角外不参与任何绘制，彻底消除虚框。
-/// 注意：SetWindowRgn 接管 region 句柄所有权（本函数不释放）；
-/// 窗口尺寸变化后需要重新调用（ai-popup 可 resize，监听 Resized 重设）。
+/// 目的：彻底消除任何残留的「幽灵标题栏 / 非客户区」——即使 DWM 或
+/// tao/wry 在窗口激活等时机重新计算非客户区（用户实测点击面板时标题栏
+/// 会弹出），这里直接让系统把整个窗口当作客户区，无任何标题栏可画。
+/// 老式子类化（替换 GWLP_WNDPROC 并转发），不依赖 comctl32。
 #[cfg(target_os = "windows")]
-fn apply_rounded_corners(window: &tauri::WebviewWindow, radius_logical: f64) {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
-    use tauri::Manager;
+fn install_nccalc_fix(window: &tauri::WebviewWindow) {
+    use std::collections::HashMap;
+    use std::sync::Mutex as StdMutex;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos,
+        GWLP_WNDPROC, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    static ORIG_PROCS: StdMutex<Option<HashMap<isize, isize>>> = StdMutex::new(None);
+    static LAST_FIX_TICK: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    unsafe extern "system" fn aux_wnd_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        // ===== 排查日志（调试期）：记录焦点 / 非客户区 / 命中测试消息与窗口样式 =====
+        const WM_NCCALCSIZE_MSG: u32 = 0x0083;
+        const WM_NCPAINT_MSG: u32 = 0x0085;
+        const WM_NCACTIVATE_MSG: u32 = 0x0086;
+        const WM_ACTIVATE_MSG: u32 = 0x0006;
+        const WM_SETFOCUS_MSG: u32 = 0x0007;
+        const WM_KILLFOCUS_MSG: u32 = 0x0008;
+        const WM_NCHITTEST_MSG: u32 = 0x0084;
+        let interesting =
+            matches!(msg, WM_NCCALCSIZE_MSG | WM_NCPAINT_MSG | WM_ACTIVATE_MSG | WM_SETFOCUS_MSG | WM_KILLFOCUS_MSG | WM_NCHITTEST_MSG);
+        if interesting {
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            crate::dlog::write(&format!(
+                "[aux] h={hwnd:?} msg=0x{msg:04X} w={wparam} style=0x{style:08X} ex=0x{ex:08X}"
+            ));
+        }
+
+        // 吞掉非客户区激活/重绘消息：不给系统任何绘制经典标题栏的机会。
+        // tao 子类链在上层已完成焦点事件派发，这里直接短路 DefWindowProc 的 NC 绘制。
+        if msg == WM_NCACTIVATE_MSG {
+            return 1; // TRUE = 已处理，无需重绘非客户区
+        }
+        if msg == WM_NCPAINT_MSG {
+            return 0;
+        }
+
+        if msg == WM_NCCALCSIZE_MSG {
+            // 客户区 = 窗口区（无标题栏 / 无边框空间）
+            return 0;
+        }
+
+        let orig = ORIG_PROCS
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|m| m.get(&(hwnd as isize)).copied())
+            .unwrap_or(0);
+        let result = if orig != 0 {
+            CallWindowProcW(Some(std::mem::transmute(orig)), hwnd, msg, wparam, lparam)
+        } else {
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        };
+
+        // ===== 防御：任何消息处理后，若窗口样式被重置为「带标题栏」状态，立即修复 =====
+        // 背景：实测点击面板（激活）时，样式会被重置回 0x14CB0000
+        // （WS_CAPTION|WS_SYSMENU|WS_BORDER + APPWINDOW）→ DWM 画标题框；
+        // 轮询（2 秒）修复太慢，这里在消息处理返回后立即检查并修复（节流 500ms 防风暴）。
+        {
+            const WS_CAPTION_ALL: u32 = 0x00C00000;
+            const WS_SYSMENU: u32 = 0x00080000;
+            const WS_BORDER: u32 = 0x00800000;
+            const WS_MINMAX: u32 = 0x00030000;
+            const WS_POPUP: u32 = 0x80000000;
+            const WS_EX_APPWINDOW: u32 = 0x00040000;
+            const WS_EX_TOOLWINDOW: u32 = 0x00000080;
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            let bad = (style & (WS_CAPTION_ALL | WS_SYSMENU | WS_BORDER | WS_MINMAX)) != 0
+                || (style & WS_POPUP) == 0
+                || (ex & WS_EX_APPWINDOW) != 0
+                || (ex & WS_EX_TOOLWINDOW) == 0;
+            if bad {
+                let now = unsafe { GetTickCount64() };
+                if now.wrapping_sub(LAST_FIX_TICK.load(std::sync::atomic::Ordering::Relaxed)) >= 500 {
+                    LAST_FIX_TICK.store(now, std::sync::atomic::Ordering::Relaxed);
+                    let new_style = (style
+                        & !(WS_CAPTION_ALL | WS_SYSMENU | WS_BORDER | WS_MINMAX))
+                        | WS_POPUP;
+                    let new_ex = (ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, new_style as isize);
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex as isize);
+                    SetWindowPos(
+                        hwnd,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                    crate::dlog::write(&format!(
+                        "[aux] FIXED after msg=0x{msg:04X} h={hwnd:?}: style=0x{new_style:08X} ex=0x{new_ex:08X} (was 0x{style:08X}/0x{ex:08X})"
+                    ));
+                }
+            }
+        }
+
+        if msg == WM_NCHITTEST_MSG {
+            crate::dlog::write(&format!("[aux] h={hwnd:?} NCHITTEST -> 0x{result:X}"));
+        }
+        result
+    }
 
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    // tauri 的 hwnd() 返回 windows crate 的 HWND 元组结构体，解包为裸指针供 windows-sys 使用
     let hwnd: *mut core::ffi::c_void = hwnd.0;
     unsafe {
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        if GetWindowRect(hwnd, &mut rect) == 0 {
-            return;
-        }
-        let w = rect.right - rect.left;
-        let h = rect.bottom - rect.top;
-        if w <= 0 || h <= 0 {
-            return;
-        }
-        // 逻辑圆角 → 物理像素（GetWindowRect 返回物理像素）
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let r = ((radius_logical * scale) as i32).clamp(1, w / 2);
-        let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
-        if !rgn.is_null() {
-            // SetWindowRgn 成功后 region 归窗口系统所有，勿 DeleteObject
-            SetWindowRgn(hwnd, rgn, 1);
+        let mut guard = ORIG_PROCS.lock().unwrap();
+        let map = guard.get_or_insert_with(HashMap::new);
+        if !map.contains_key(&(hwnd as isize)) {
+            let orig = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, aux_wnd_proc as isize);
+            map.insert(hwnd as isize, orig);
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            crate::dlog::write(&format!(
+                "[aux] nccalc installed hwnd={hwnd:?} style=0x{style:08X} ex=0x{ex:08X} orig=0x{orig:X}"
+            ));
         }
     }
 }
@@ -391,6 +487,8 @@ fn apply_rounded_corners(window: &tauri::WebviewWindow, radius_logical: f64) {
 ///   （wry 的 decorations:false 仅隐藏标题栏渲染但保留样式位，失焦时
 ///   DWM 会按样式位绘制「非活动窗口框架」——实测复现）
 /// - DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED 禁用 DWM 非客户区渲染
+/// - DWMWA_WINDOW_CORNER_PREFERENCE=ROUND：系统圆角（注意不能用 SetWindowRgn
+///   裁剪——acrylic 等 DWM 背景按窗口矩形渲染，region 不裁剪 DWM 背景会变直角）
 #[cfg(target_os = "windows")]
 fn make_tool_window(window: &tauri::WebviewWindow) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -430,6 +528,10 @@ fn make_tool_window(window: &tauri::WebviewWindow) {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
         }
+        crate::dlog::write(&format!(
+            "[aux] make_tool_window label={} style=0x{new_style:08X} ex=0x{new_ex:08X}",
+            window.label()
+        ));
         // 禁用 DWM 非客户区渲染（彻底不绘制标题栏/边框，失焦也不出现）
         let ncr_policy: i32 = 1; // DWMNCRP_DISABLED
         let _ = windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
@@ -446,6 +548,16 @@ fn make_tool_window(window: &tauri::WebviewWindow) {
             34, // DWMWA_BORDER_COLOR
             &no_border as *const u32 as *const core::ffi::c_void,
             std::mem::size_of::<u32>() as u32,
+        );
+        // 系统圆角（DWMWA_WINDOW_CORNER_PREFERENCE = 33，DWMWCP_ROUND = 2）：
+        // 替代 SetWindowRgn 圆角——acrylic 等 DWM 背景按窗口矩形渲染，
+        // region 裁剪不到 DWM 背景会变直角；系统圆角是 DWM 层裁剪，两者兼容
+        let round_corner: i32 = 2;
+        let _ = windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            hwnd,
+            33,
+            &round_corner as *const i32 as *const core::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
         );
     }
 }
@@ -1254,11 +1366,11 @@ pub fn run() {
             sync_idle(&state);
             privacy::start();
             let app_handle = app.handle().clone();
-            // 辅助窗口圆角裁剪 + 工具窗口样式（透明小窗不出现在 Alt+Tab / 任务视图）
+            // 辅助窗口：工具窗口样式 + 系统圆角 + WM_NCCALCSIZE 全客户区（彻底无标题栏）
             for label in ["ai-popup", "audio-panel", "pet-window"] {
                 if let Some(win) = app.get_webview_window(label) {
-                    apply_rounded_corners(&win, 12.0);
                     make_tool_window(&win);
+                    install_nccalc_fix(&win);
                 }
             }
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
@@ -1283,12 +1395,8 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Resized(_) => {
-                // 可调整大小的辅助窗口（AI 小窗）尺寸变化后重设圆角区域
-                if window.label() == "ai-popup" {
-                    if let Some(win) = window.app_handle().get_webview_window("ai-popup") {
-                        apply_rounded_corners(&win, 12.0);
-                    }
-                }
+                // 辅助窗口（AI 小窗可 resize）尺寸变化后无需额外处理：
+                // 系统圆角（DWMWCP_ROUND）随窗口尺寸自动适配
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();

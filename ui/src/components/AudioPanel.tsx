@@ -95,7 +95,9 @@ export default function AudioPanel() {
     };
   }, []);
 
-  // 面板可见性：无播放 / 不支持 SMTC / 全屏时淡出隐藏
+  // 面板可见性：无播放 / 不支持 SMTC / 全屏时隐藏。
+  // 注意：acrylic 毛玻璃是窗口级属性（不随内容 opacity 淡出），
+  // 因此「隐藏」必须是窗口级 hide/show，而非仅 CSS 淡出。
   const visible =
     positioned &&
     media !== null &&
@@ -103,7 +105,16 @@ export default function AudioPanel() {
     media.active &&
     !fullscreen;
 
-  const show = visible;
+  // 窗口级显示/隐藏（acrylic 无法随内容淡出）
+  useEffect(() => {
+    if (!inTauri()) return;
+    const win = getCurrentWindow();
+    if (visible) {
+      void win.show();
+    } else {
+      void win.hide();
+    }
+  }, [visible]);
 
   const control = useCallback((action: "prev" | "play" | "pause" | "next") => {
     audioMediaControl(action);
@@ -122,7 +133,7 @@ export default function AudioPanel() {
     : media?.appName || (media?.active ? "媒体会话" : "");
 
   return (
-    <div className={`audio-panel${show ? " visible" : ""}`}>
+    <div className={`audio-panel${visible ? " visible" : ""}`}>
       <div className="audio-panel-drag" data-tauri-drag-region />
       <div className="audio-panel-body">
         <div className="audio-panel-info">

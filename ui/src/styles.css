@@ -1324,13 +1324,13 @@ button {
 }
 
 /* ============ AI 小窗（FR-17） ============ */
-/* 同音频面板：透明窗口上避免 backdrop-filter 的矩形边缘伪影 */
+/* 同音频面板：背景完全不透明，避免透出背后窗口（失焦观感异常） */
 .ai-popup-shell {
   position: fixed;
   inset: 10px;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-paper) 92%, transparent);
+  background: var(--color-paper);
   border: 1px solid var(--color-paper-deep);
   border-radius: 16px;
   overflow: hidden;
@@ -1412,21 +1412,46 @@ button {
   justify-content: flex-end;
 }
 
-/* ============ 音频识别面板（FR-18，液态玻璃） ============ */
-/* 透明窗口上：不用 backdrop-filter（边缘伪影）、不用 border/box-shadow（轮廓虚框）、
-   关闭系统阴影（shadow:false，矩形虚影框）；面板铺满窗口，仅靠高不透明度背景 + 圆角 */
+/* ============ 音频识别面板（FR-18，液态玻璃拟态） ============ */
+/* 注：透明窗口上无法真模糊窗外内容（backdrop-filter 无效、acrylic 与 WebView2 不兼容），
+   采用与主界面侧边栏同款的「半透明 + 噪声纹理 + 内高光」玻璃拟态；
+   半透明度取 82%（兼顾质感与可读性，背后内容轻微透出即玻璃感） */
 .audio-panel {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-paper) 88%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-paper-warm) 82%, transparent),
+    color-mix(in srgb, var(--color-paper) 86%, transparent)
+  );
   border-radius: 12px;
   overflow: hidden;
+  /* 内高光 + 细描边（inset 阴影窗口内渲染，不外溢） */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-paper-deep) 65%, transparent);
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 0.35s ease, transform 0.35s ease;
   pointer-events: none;
+}
+/* 噪声纹理（复刻侧边栏质感） */
+.audio-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+.audio-panel > * {
+  position: relative;
+  z-index: 1;
 }
 .audio-panel.visible {
   opacity: 1;
@@ -1473,6 +1498,9 @@ button {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  /* 置于拖拽热区（.audio-panel-drag z-index:2）之上，保证按钮整块可点击 */
+  position: relative;
+  z-index: 3;
 }
 .audio-btn {
   display: flex;
@@ -1743,7 +1771,7 @@ button {
   padding: 5px;
   border-radius: 12px;
   border: 1px solid var(--color-paper-deep);
-  background: color-mix(in srgb, var(--color-paper) 96%, transparent);
+  background: var(--color-paper);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
   animation: pet-menu-in 0.15s ease;
 }
