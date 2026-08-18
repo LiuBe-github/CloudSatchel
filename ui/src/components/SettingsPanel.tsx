@@ -21,6 +21,8 @@ interface SettingsPanelProps {
   aiPopupRegistered: boolean;
   onAiPopupEnabledChange: (enabled: boolean) => Promise<void>;
   onAiPopupHotkeyChange: (key: string) => Promise<void>;
+  audioPanelEnabled: boolean;
+  onAudioPanelEnabledChange: (enabled: boolean) => Promise<void>;
   background: BackgroundSettings;
   backgroundName: string;
   onBackgroundChange: (next: BackgroundSettings) => void;
@@ -73,6 +75,8 @@ export function SettingsPanel({
   aiPopupRegistered,
   onAiPopupEnabledChange,
   onAiPopupHotkeyChange,
+  audioPanelEnabled,
+  onAudioPanelEnabledChange,
   background,
   backgroundName,
   onBackgroundChange,
@@ -366,6 +370,23 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-section">
+          <div className="settings-label">音频识别</div>
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">启用音频面板</div>
+              <div className="setting-row-desc">桌面右下角显示当前播放的音源、进度与媒体控制；有播放时显示，无播放自动隐藏</div>
+            </div>
+            <Switch
+              checked={audioPanelEnabled}
+              onChange={() => void onAudioPanelEnabledChange(!audioPanelEnabled)}
+            />
+          </div>
+          <div className="setting-row-desc" style={{ marginTop: 8 }}>
+            音源信息与控制在本地通过系统媒体会话（SMTC）读取；波形由 WASAPI 采集 + FFT 生成，不联网、不写注册表
+          </div>
+        </div>
+
+        <div className="settings-section">
           <div className="settings-label">启动与退出</div>
           <div className="setting-row">
             <div className="setting-row-text">
@@ -394,7 +415,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.14.0</span>
+          <span className="settings-version">云笈 · v0.15.0</span>
         </div>
       </div>
     </div>

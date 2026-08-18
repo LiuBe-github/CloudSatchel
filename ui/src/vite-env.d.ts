@@ -31,6 +31,10 @@ export interface AppState {
   aiPopupEnabled: boolean; // AI 小窗开关（默认开）
   aiPopupHotkey: string; // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
   aiPopupRegistered: boolean; // AI 小窗热键是否注册成功
+  audioPanelEnabled: boolean; // 音频识别面板开关（默认开）
+  audioPanelX: number; // 音频面板位置 X（物理像素，-1 = 未设置）
+  audioPanelY: number; // 音频面板位置 Y
+  fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
@@ -53,6 +57,22 @@ export interface AiConfig {
   hasKey: boolean;
   model: string;
   baseUrl: string;
+}
+
+/** SMTC 媒体会话状态（FR-18） */
+export interface MediaState {
+  active: boolean;
+  playing: boolean;
+  appName: string;
+  title: string;
+  artist: string;
+  positionSecs: number;
+  durationSecs: number;
+  prevEnabled: boolean;
+  nextEnabled: boolean;
+  playEnabled: boolean;
+  pauseEnabled: boolean;
+  supported: boolean;
 }
 
 export interface CpuMetrics {

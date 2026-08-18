@@ -11,6 +11,7 @@ import {
   setPrivacyBossKey,
   setAiPopupEnabled,
   setAiPopupHotkey,
+  setAudioPanelEnabled,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -108,6 +109,10 @@ function App({ initial }: AppProps) {
       aiPopupEnabled: true,
       aiPopupHotkey: "Ctrl+Shift+Space",
       aiPopupRegistered: false,
+      audioPanelEnabled: true,
+      audioPanelX: -1,
+      audioPanelY: -1,
+      fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
       aiModel: "gpt-4o-mini",
@@ -278,6 +283,17 @@ function App({ initial }: AppProps) {
     toastRef.current?.show("AI 小窗快捷键已更新");
   }, []);
 
+  const handleAudioPanelEnabledChange = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setAudioPanelEnabled(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "音频识别已开启" : "音频识别已关闭");
+    } catch (err) {
+      console.error("切换音频识别失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
     try {
       const next = await setAutohideEnabled(enabled);
@@ -444,7 +460,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.14.0</div>
+          <div className="sidebar-version">v0.15.0</div>
           </div>
         </aside>
 
@@ -567,6 +583,8 @@ function App({ initial }: AppProps) {
           aiPopupRegistered={state.aiPopupRegistered}
           onAiPopupEnabledChange={handleAiPopupEnabledChange}
           onAiPopupHotkeyChange={handleAiPopupHotkeyChange}
+          audioPanelEnabled={state.audioPanelEnabled}
+          onAudioPanelEnabledChange={handleAudioPanelEnabledChange}
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

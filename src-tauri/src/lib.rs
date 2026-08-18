@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+mod audio;
 mod autostart;
 mod background;
 mod dlog;
@@ -59,6 +60,9 @@ pub(crate) struct AppState {
     ai_popup_enabled: Mutex<bool>,   // AI 小窗（FR-17）开关（默认开）
     ai_popup_hotkey: Mutex<String>,  // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
     ai_popup_registered: Mutex<bool>, // AI 小窗热键当前是否注册成功（运行时状态，不入盘）
+    audio_panel_enabled: Mutex<bool>, // 音频识别面板（FR-18）开关（默认开）
+    audio_panel_x: Mutex<i32>,        // 面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
+    audio_panel_y: Mutex<i32>,        // 面板位置 Y
 }
 
 impl Default for AppState {
@@ -88,6 +92,9 @@ impl Default for AppState {
             ai_popup_enabled: Mutex::new(true),
             ai_popup_hotkey: Mutex::new("Ctrl+Shift+Space".to_string()),
             ai_popup_registered: Mutex::new(false),
+            audio_panel_enabled: Mutex::new(true),
+            audio_panel_x: Mutex::new(-1),
+            audio_panel_y: Mutex::new(-1),
         }
     }
 }
@@ -100,6 +107,7 @@ struct Snapshot {
     taskbar_transparent: bool,
     theme: String,
     animating: bool,
+    fullscreen_active: bool,
     autostart: bool,
     close_to_tray: bool,
     performance_monitor: bool,
@@ -115,6 +123,9 @@ struct Snapshot {
     ai_popup_enabled: bool,
     ai_popup_hotkey: String,
     ai_popup_registered: bool,
+    audio_panel_enabled: bool,
+    audio_panel_x: i32,
+    audio_panel_y: i32,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -132,6 +143,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         taskbar_transparent: *state.taskbar_transparent.lock().unwrap(),
         theme: state.theme.lock().unwrap().clone(),
         animating: *state.animating.lock().unwrap(),
+        fullscreen_active: *state.fullscreen_active.lock().unwrap(),
         autostart: *state.autostart.lock().unwrap(),
         close_to_tray: *state.close_to_tray.lock().unwrap(),
         performance_monitor: *state.performance_monitor.lock().unwrap(),
@@ -147,6 +159,9 @@ fn snapshot(state: &AppState) -> Snapshot {
         ai_popup_enabled: *state.ai_popup_enabled.lock().unwrap(),
         ai_popup_hotkey: state.ai_popup_hotkey.lock().unwrap().clone(),
         ai_popup_registered: *state.ai_popup_registered.lock().unwrap(),
+        audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
+        audio_panel_x: *state.audio_panel_x.lock().unwrap(),
+        audio_panel_y: *state.audio_panel_y.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -178,6 +193,9 @@ fn persist(state: &AppState) {
         privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
         ai_popup_enabled: *state.ai_popup_enabled.lock().unwrap(),
         ai_popup_hotkey: state.ai_popup_hotkey.lock().unwrap().clone(),
+        audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
+        audio_panel_x: *state.audio_panel_x.lock().unwrap(),
+        audio_panel_y: *state.audio_panel_y.lock().unwrap(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -249,6 +267,7 @@ fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
     perf::stop();
     privacy::stop();
+    audio::stop();
     hotkey::unregister_all();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
@@ -696,6 +715,54 @@ fn set_ai_popup_hotkey(
     }
 }
 
+/// 开关音频识别面板（FR-18，默认开）：关闭后停止采集并隐藏面板
+#[tauri::command]
+fn set_audio_panel_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.audio_panel_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    audio::set_enabled(enabled);
+    if !enabled {
+        if let Some(win) = app.get_webview_window("audio-panel") {
+            let _ = win.hide();
+        }
+    }
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 保存音频面板位置（拖拽结束时调用，持久化）
+#[tauri::command]
+fn set_audio_panel_position(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    x: i32,
+    y: i32,
+) -> Snapshot {
+    *state.audio_panel_x.lock().unwrap() = x;
+    *state.audio_panel_y.lock().unwrap() = y;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 媒体控制：play / pause / next / prev（FR-18，SMTC 控制命令）
+#[tauri::command]
+fn audio_media_control(app: AppHandle, action: String) {
+    audio::control(app, &action);
+}
 #[tauri::command]
 fn get_ai_config(state: State<std::sync::Arc<AppState>>) -> ai::AiConfig {
     ai::get_ai_config(
@@ -911,6 +978,9 @@ pub fn run() {
     *state.privacy_boss_key.lock().unwrap() = prefs.privacy_boss_key.clone();
     *state.ai_popup_enabled.lock().unwrap() = prefs.ai_popup_enabled;
     *state.ai_popup_hotkey.lock().unwrap() = prefs.ai_popup_hotkey.clone();
+    *state.audio_panel_enabled.lock().unwrap() = prefs.audio_panel_enabled;
+    *state.audio_panel_x.lock().unwrap() = prefs.audio_panel_x;
+    *state.audio_panel_y.lock().unwrap() = prefs.audio_panel_y;
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -940,6 +1010,9 @@ pub fn run() {
             set_ai_base_url,
             set_ai_popup_enabled,
             set_ai_popup_hotkey,
+            set_audio_panel_enabled,
+            set_audio_panel_position,
+            audio_media_control,
             get_perf_snapshot,
             get_ai_config,
             ai::save_ai_key,
@@ -980,6 +1053,9 @@ pub fn run() {
             let _ = sync_boss_key(&app_handle, &state);
             // AI 小窗热键跟随开关恢复注册（默认开；注册失败仅降级为不可呼出）
             let _ = sync_ai_popup(&app_handle, &state);
+            // 音频识别（FR-18）：启动轮询并按持久化开关设置
+            audio::set_enabled(*state.audio_panel_enabled.lock().unwrap());
+            audio::start(app_handle.clone());
             if *state.taskbar_transparent.lock().unwrap() {
                 sync_taskbar(&app_handle, &state);
             }

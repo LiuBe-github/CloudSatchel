@@ -38,6 +38,9 @@ fn default_boss_key() -> String {
 fn default_ai_popup_hotkey() -> String {
     "Ctrl+Shift+Space".to_string()
 }
+fn default_neg_one() -> i32 {
+    -1
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -86,6 +89,12 @@ pub struct AppPrefs {
     pub ai_popup_enabled: bool, // AI 小窗（FR-17）开关，默认开启
     #[serde(default = "default_ai_popup_hotkey")]
     pub ai_popup_hotkey: String, // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
+    #[serde(default = "default_true")]
+    pub audio_panel_enabled: bool, // 音频识别面板（FR-18）开关，默认开启
+    #[serde(default = "default_neg_one")]
+    pub audio_panel_x: i32, // 音频面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
+    #[serde(default = "default_neg_one")]
+    pub audio_panel_y: i32, // 音频面板位置 Y
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -121,6 +130,9 @@ impl Default for AppPrefs {
             privacy_boss_key: default_boss_key(),
             ai_popup_enabled: true,
             ai_popup_hotkey: default_ai_popup_hotkey(),
+            audio_panel_enabled: true,
+            audio_panel_x: default_neg_one(),
+            audio_panel_y: default_neg_one(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

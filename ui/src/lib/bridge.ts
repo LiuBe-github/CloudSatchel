@@ -6,6 +6,7 @@ import type {
   AiMessage,
   AppState,
   BackgroundSettings,
+  MediaState,
   PerfSnapshot,
   ThemeMode,
 } from "../vite-env";
@@ -31,6 +32,10 @@ const FALLBACK_STATE: AppState = {
   aiPopupEnabled: true,
   aiPopupHotkey: "Ctrl+Shift+Space",
   aiPopupRegistered: false,
+  audioPanelEnabled: true,
+  audioPanelX: -1,
+  audioPanelY: -1,
+  fullscreenActive: false,
   theme: "system",
   animating: false,
   autostart: false,
@@ -100,6 +105,46 @@ export async function setAiPopupEnabled(enabled: boolean): Promise<AppState> {
 export async function setAiPopupHotkey(key: string): Promise<AppState> {
   if (!inTauri()) return fallback({ aiPopupHotkey: key });
   return (await invoke<AppState>("set_ai_popup_hotkey", { key })) as AppState;
+}
+
+// ---------------------------------------------------------------------------
+// 音频识别（FR-18）
+// ---------------------------------------------------------------------------
+
+/** 开关音频识别面板 */
+export async function setAudioPanelEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ audioPanelEnabled: enabled });
+  return (await invoke<AppState>("set_audio_panel_enabled", { enabled })) as AppState;
+}
+
+/** 保存音频面板位置（拖拽结束） */
+export async function setAudioPanelPosition(x: number, y: number): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("set_audio_panel_position", { x, y });
+}
+
+/** 媒体控制：prev / play / pause / next */
+export function audioMediaControl(action: string): void {
+  if (!inTauri()) return;
+  void invoke("audio_media_control", { action });
+}
+
+/** 订阅 SMTC 媒体会话状态 */
+export function onMediaState(cb: (state: MediaState) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<MediaState>("media-state", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 订阅音频波形（16 档频段能量） */
+export function onAudioWave(cb: (wave: number[]) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<number[]>("audio-wave", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
 }
 
 export async function setPerfIntervalMs(ms: number): Promise<AppState> {
