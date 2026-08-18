@@ -484,7 +484,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.16.6</div>
+          <div className="sidebar-version">v0.16.7</div>
           </div>
         </aside>
 

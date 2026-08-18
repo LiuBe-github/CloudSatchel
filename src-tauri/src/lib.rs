@@ -438,6 +438,15 @@ fn make_tool_window(window: &tauri::WebviewWindow) {
             &ncr_policy as *const i32 as *const core::ffi::c_void,
             std::mem::size_of::<i32>() as u32,
         );
+        // 关闭 Win11 的窗口边框（DWMWA_BORDER_COLOR = 34，DWMWA_COLOR_NONE = 0xFFFFFFFE）：
+        // Win11 22H2+ 会给窗口（含失焦态）画 1px 边框线，即用户看到的「框」
+        let no_border: u32 = 0xFFFFFFFE;
+        let _ = windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            hwnd,
+            34, // DWMWA_BORDER_COLOR
+            &no_border as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
     }
 }
 

@@ -415,7 +415,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.16.6</span>
+          <span className="settings-version">云笈 · v0.16.7</span>
         </div>
       </div>
     </div>
