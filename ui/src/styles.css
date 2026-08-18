@@ -1534,6 +1534,254 @@ button {
   transition: height 0.12s ease;
 }
 
+/* ============ 虚拟桌宠（FR-16，CSS 自绘竹灵小猫） ============ */
+.pet-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  user-select: none;
+  cursor: grab;
+  z-index: 1;
+}
+.pet-shell.ready {
+  opacity: 1;
+}
+.pet-shell:active {
+  cursor: grabbing;
+}
+.pet-sprite {
+  position: relative;
+  width: 96px;
+  height: 112px;
+  transform-origin: 50% 100%;
+  animation: pet-breathe 3.2s ease-in-out infinite alternate;
+}
+@keyframes pet-breathe {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.045);
+  }
+}
+/* 头（竹青圆脸） */
+.pet-head {
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  width: 60px;
+  height: 54px;
+  background: linear-gradient(180deg, #7cbf8f, #4faa70);
+  border-radius: 50% 50% 46% 46%;
+  z-index: 3;
+}
+/* 耳朵 */
+.pet-ear {
+  position: absolute;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(180deg, #8fd0a0, #4faa70);
+  z-index: 2;
+}
+.pet-ear-l {
+  left: 16px;
+  border-radius: 60% 10% 60% 10%;
+  transform: rotate(-18deg);
+}
+.pet-ear-r {
+  right: 16px;
+  border-radius: 10% 60% 10% 60%;
+  transform: rotate(18deg);
+}
+.pet-ear::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  background: #f3d9b8;
+  border-radius: 60% 20% 60% 20%;
+}
+/* 眼睛（眨眼动画） */
+.pet-eye {
+  position: absolute;
+  top: 22px;
+  width: 8px;
+  height: 9px;
+  background: #24332a;
+  border-radius: 50%;
+  animation: pet-blink 4.6s ease-in-out infinite;
+}
+.pet-eye-l {
+  left: 15px;
+}
+.pet-eye-r {
+  right: 15px;
+}
+@keyframes pet-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.12);
+  }
+}
+/* 嘴巴 */
+.pet-muzzle {
+  position: absolute;
+  bottom: 9px;
+  left: 50%;
+  width: 14px;
+  height: 7px;
+  margin-left: -7px;
+  border-bottom: 2px solid #2d4a36;
+  border-radius: 0 0 50% 50%;
+}
+/* 腮红 */
+.pet-blush {
+  position: absolute;
+  top: 30px;
+  width: 9px;
+  height: 5px;
+  background: rgba(244, 164, 138, 0.75);
+  border-radius: 50%;
+}
+.pet-blush-l {
+  left: 7px;
+}
+.pet-blush-r {
+  right: 7px;
+}
+/* 身体 */
+.pet-body {
+  position: absolute;
+  bottom: 0;
+  left: 12px;
+  width: 72px;
+  height: 58px;
+  background: linear-gradient(180deg, #7cbf8f, #3f8f5c);
+  border-radius: 40% 40% 46% 46%;
+  z-index: 2;
+}
+/* 前爪 */
+.pet-paw {
+  position: absolute;
+  bottom: 0;
+  width: 16px;
+  height: 12px;
+  background: #f3d9b8;
+  border-radius: 50% 50% 40% 40%;
+  z-index: 4;
+}
+.pet-paw-l {
+  left: 14px;
+}
+.pet-paw-r {
+  right: 14px;
+}
+/* 尾巴（摆动动画） */
+.pet-tail {
+  position: absolute;
+  bottom: 6px;
+  right: -6px;
+  width: 34px;
+  height: 14px;
+  background: linear-gradient(90deg, #3f8f5c, #7cbf8f);
+  border-radius: 50% 10% 50% 10%;
+  transform-origin: left center;
+  animation: pet-wag 2.4s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes pet-wag {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(14deg);
+  }
+}
+/* 地面阴影 */
+.pet-shadow {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  width: 64px;
+  height: 8px;
+  margin-left: -32px;
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 50%;
+  animation: pet-shadow 3.2s ease-in-out infinite alternate;
+}
+@keyframes pet-shadow {
+  from {
+    transform: scaleX(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scaleX(0.88);
+    opacity: 0.65;
+  }
+}
+/* 桌宠小菜单 */
+.pet-menu-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+}
+.pet-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 108px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--color-paper-deep);
+  background: color-mix(in srgb, var(--color-paper) 94%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  animation: pet-menu-in 0.15s ease;
+}
+@keyframes pet-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pet-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.pet-menu-item:hover {
+  background: var(--color-bamboo-mist);
+  color: var(--color-bamboo);
+}
+.pet-menu-icon {
+  font-size: 13px;
+}
+
 /* ============ 性能页开关行（间隔下拉 + 开关） ============ */
 .perf-switch-group {
   display: flex;

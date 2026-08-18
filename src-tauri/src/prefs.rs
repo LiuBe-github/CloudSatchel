@@ -95,6 +95,12 @@ pub struct AppPrefs {
     pub audio_panel_x: i32, // 音频面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
     #[serde(default = "default_neg_one")]
     pub audio_panel_y: i32, // 音频面板位置 Y
+    #[serde(default)]
+    pub pet_enabled: bool, // 虚拟桌宠（FR-16）开关，默认关闭
+    #[serde(default = "default_neg_one")]
+    pub pet_x: i32, // 桌宠位置 X（物理像素，-1 = 未设置 → 底部默认）
+    #[serde(default = "default_neg_one")]
+    pub pet_y: i32, // 桌宠位置 Y
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -133,6 +139,9 @@ impl Default for AppPrefs {
             audio_panel_enabled: true,
             audio_panel_x: default_neg_one(),
             audio_panel_y: default_neg_one(),
+            pet_enabled: false,
+            pet_x: default_neg_one(),
+            pet_y: default_neg_one(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

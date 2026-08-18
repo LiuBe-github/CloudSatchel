@@ -12,6 +12,7 @@ import {
   setAiPopupEnabled,
   setAiPopupHotkey,
   setAudioPanelEnabled,
+  setPetEnabled,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -75,6 +76,14 @@ const FEATURES = [
     detail:
       "配置你自己的接口地址、API Key 与模型名后即可使用（支持 OpenAI 及兼容服务）：流式回复、多轮上下文、可随时停止生成或清空对话。Key 经系统加密保存，仅在你发送消息时访问所配置的接口。",
   },
+  {
+    id: "pet",
+    icon: "❀",
+    title: "虚拟桌宠",
+    subtitle: "桌面常驻一只竹灵小猫，可拖拽陪伴",
+    detail:
+      "开启后桌面右下角出现一只自绘竹灵小猫（无第三方素材、不联网下载）。左键拖拽可移动位置（重启后保持）；双击或右键弹出菜单：隐藏桌宠 / 退出桌宠。隐私操作触发时桌宠随之一并隐藏，恢复后还原。",
+  },
 ];
 
 function backgroundOf(state: AppState): BackgroundSettings {
@@ -112,6 +121,9 @@ function App({ initial }: AppProps) {
       audioPanelEnabled: true,
       audioPanelX: -1,
       audioPanelY: -1,
+      petEnabled: false,
+      petX: -1,
+      petY: -1,
       fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
@@ -182,11 +194,14 @@ function App({ initial }: AppProps) {
     try {
       const isPerformance = activeId === FEATURES[2].id;
       const isPrivacy = activeId === FEATURES[3].id;
+      const isPet = activeId === FEATURES[5].id;
       const next = isPerformance
         ? await setPerformanceMonitor(!state.performanceMonitor)
         : isPrivacy
           ? await setPrivacyEnabled(!state.privacyEnabled)
-          : await setEnabled(!state.enabled);
+          : isPet
+            ? await setPetEnabled(!state.petEnabled)
+            : await setEnabled(!state.enabled);
       setState(next);
       if (isPerformance) {
         toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
@@ -196,6 +211,8 @@ function App({ initial }: AppProps) {
             ? "隐私操作已开启，空闲时将自动保护屏幕"
             : "隐私操作已关闭",
         );
+      } else if (isPet) {
+        toastRef.current?.show(next.petEnabled ? "桌宠已上桌" : "桌宠已离开");
       } else if (next.enabled) {
         toastRef.current?.show("功能已激活，现在可以双击桌面空白处切换图标");
       } else {
@@ -207,7 +224,7 @@ function App({ initial }: AppProps) {
     } finally {
       setBusyToggle(false);
     }
-  }, [busyToggle, state.enabled, state.performanceMonitor, state.privacyEnabled, activeId]);
+  }, [busyToggle, state.enabled, state.performanceMonitor, state.privacyEnabled, state.petEnabled, activeId]);
 
   const handleTheme = useCallback(
     async (mode: ThemeMode) => {
@@ -373,11 +390,14 @@ function App({ initial }: AppProps) {
   const isPerformance = activeId === FEATURES[2].id;
   const isPrivacy = activeId === FEATURES[3].id;
   const isAi = activeId === FEATURES[4].id;
+  const isPet = activeId === FEATURES[5].id;
   const featureOn = isPerformance
     ? state.performanceMonitor
     : isPrivacy
       ? state.privacyEnabled
-      : state.enabled;
+      : isPet
+        ? state.petEnabled
+        : state.enabled;
   const stateHint = isPerformance
     ? state.performanceMonitor
       ? "性能监控 · 当前已开启"
@@ -386,9 +406,13 @@ function App({ initial }: AppProps) {
       ? state.privacyActive
         ? "隐私操作 · 已触发保护，操作鼠标或键盘后自动还原"
         : "隐私操作 · 空闲超过设定时间自动触发"
-      : state.iconsHidden
-        ? "桌面图标 · 当前已隐藏"
-        : "桌面图标 · 当前已显示";
+      : isPet
+        ? state.petEnabled
+          ? "桌宠 · 当前在桌面陪着你"
+          : "桌宠 · 当前未上桌"
+        : state.iconsHidden
+          ? "桌面图标 · 当前已隐藏"
+          : "桌面图标 · 当前已显示";
 
   return (
     <div className={`app-shell${maximized ? " maximized" : ""}`}>
@@ -460,7 +484,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.15.0</div>
+          <div className="sidebar-version">v0.16.0</div>
           </div>
         </aside>
 
@@ -561,7 +585,9 @@ function App({ initial }: AppProps) {
                   ? "空闲超时自动保护 · 操作鼠标或键盘立即还原 · 退出应用自动恢复"
                   : isAi
                     ? "仅在你发送消息时访问你配置的接口地址 · Key 本地加密保存 · 对话不落盘"
-                    : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
+                    : isPet
+                      ? "自绘精灵无版权素材 · 不联网 · 拖拽位置自动保存 · 隐私触发时一并隐藏"
+                      : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
 

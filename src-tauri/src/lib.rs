@@ -63,6 +63,9 @@ pub(crate) struct AppState {
     audio_panel_enabled: Mutex<bool>, // 音频识别面板（FR-18）开关（默认开）
     audio_panel_x: Mutex<i32>,        // 面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
     audio_panel_y: Mutex<i32>,        // 面板位置 Y
+    pet_enabled: Mutex<bool>,         // 虚拟桌宠（FR-16）开关（默认关）
+    pet_x: Mutex<i32>,                // 桌宠位置 X（物理像素，-1 = 未设置 → 底部默认）
+    pet_y: Mutex<i32>,                // 桌宠位置 Y
 }
 
 impl Default for AppState {
@@ -95,6 +98,9 @@ impl Default for AppState {
             audio_panel_enabled: Mutex::new(true),
             audio_panel_x: Mutex::new(-1),
             audio_panel_y: Mutex::new(-1),
+            pet_enabled: Mutex::new(false),
+            pet_x: Mutex::new(-1),
+            pet_y: Mutex::new(-1),
         }
     }
 }
@@ -126,6 +132,9 @@ struct Snapshot {
     audio_panel_enabled: bool,
     audio_panel_x: i32,
     audio_panel_y: i32,
+    pet_enabled: bool,
+    pet_x: i32,
+    pet_y: i32,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -162,6 +171,9 @@ fn snapshot(state: &AppState) -> Snapshot {
         audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
         audio_panel_x: *state.audio_panel_x.lock().unwrap(),
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
+        pet_enabled: *state.pet_enabled.lock().unwrap(),
+        pet_x: *state.pet_x.lock().unwrap(),
+        pet_y: *state.pet_y.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -196,6 +208,9 @@ fn persist(state: &AppState) {
         audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
         audio_panel_x: *state.audio_panel_x.lock().unwrap(),
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
+        pet_enabled: *state.pet_enabled.lock().unwrap(),
+        pet_x: *state.pet_x.lock().unwrap(),
+        pet_y: *state.pet_y.lock().unwrap(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -763,6 +778,53 @@ fn set_audio_panel_position(
 fn audio_media_control(app: AppHandle, action: String) {
     audio::control(app, &action);
 }
+
+/// 开关虚拟桌宠（FR-16）：开 → 显示桌宠窗口；关 → 隐藏
+#[tauri::command]
+fn set_pet_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.pet_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    if let Some(win) = app.get_webview_window("pet-window") {
+        if enabled {
+            // 隐私已触发时不显示（恢复后由 poll_loop 联动显示）
+            if !privacy::is_triggered() {
+                let _ = win.show();
+            }
+        } else {
+            let _ = win.hide();
+        }
+    }
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 保存桌宠位置（拖拽结束，持久化）
+#[tauri::command]
+fn set_pet_position(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    x: i32,
+    y: i32,
+) -> Snapshot {
+    *state.pet_x.lock().unwrap() = x;
+    *state.pet_y.lock().unwrap() = y;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
 #[tauri::command]
 fn get_ai_config(state: State<std::sync::Arc<AppState>>) -> ai::AiConfig {
     ai::get_ai_config(
@@ -923,6 +985,14 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
                 if *cur != pa {
                     *cur = pa;
                     drop(cur);
+                    // 桌宠随隐私序列隐藏 / 恢复时还原（FR-16 与 FR-13 联动）
+                    if let Some(win) = app.get_webview_window("pet-window") {
+                        if pa {
+                            let _ = win.hide();
+                        } else if *state.pet_enabled.lock().unwrap() {
+                            let _ = win.show();
+                        }
+                    }
                     let _ = app.emit("state-updated", snapshot(&state));
                 }
             }
@@ -981,6 +1051,9 @@ pub fn run() {
     *state.audio_panel_enabled.lock().unwrap() = prefs.audio_panel_enabled;
     *state.audio_panel_x.lock().unwrap() = prefs.audio_panel_x;
     *state.audio_panel_y.lock().unwrap() = prefs.audio_panel_y;
+    *state.pet_enabled.lock().unwrap() = prefs.pet_enabled;
+    *state.pet_x.lock().unwrap() = prefs.pet_x;
+    *state.pet_y.lock().unwrap() = prefs.pet_y;
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -1013,6 +1086,8 @@ pub fn run() {
             set_audio_panel_enabled,
             set_audio_panel_position,
             audio_media_control,
+            set_pet_enabled,
+            set_pet_position,
             get_perf_snapshot,
             get_ai_config,
             ai::save_ai_key,

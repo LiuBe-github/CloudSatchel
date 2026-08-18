@@ -35,6 +35,9 @@ const FALLBACK_STATE: AppState = {
   audioPanelEnabled: true,
   audioPanelX: -1,
   audioPanelY: -1,
+  petEnabled: false,
+  petX: -1,
+  petY: -1,
   fullscreenActive: false,
   theme: "system",
   animating: false,
@@ -145,6 +148,22 @@ export function onAudioWave(cb: (wave: number[]) => void): () => void {
   return () => {
     void unlisten.then((fn) => fn());
   };
+}
+
+// ---------------------------------------------------------------------------
+// 虚拟桌宠（FR-16）
+// ---------------------------------------------------------------------------
+
+/** 开关虚拟桌宠 */
+export async function setPetEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ petEnabled: enabled });
+  return (await invoke<AppState>("set_pet_enabled", { enabled })) as AppState;
+}
+
+/** 保存桌宠位置（拖拽结束） */
+export async function setPetPosition(x: number, y: number): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("set_pet_position", { x, y });
 }
 
 export async function setPerfIntervalMs(ms: number): Promise<AppState> {
