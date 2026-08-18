@@ -74,6 +74,12 @@
 - 2026-08-18 v0.16.3 音频面板重新打开不显示（用户反馈）
   - bug：set_audio_panel_enabled(true) 只恢复数据采集，窗口仍处于关闭时的 hide 状态 → 补 show + unminimize
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.3
+- 2026-08-18 v0.16.4 辅助窗口出现在 Alt+Tab（用户截图：与 Photoshop 并列的「音频面板」）
+  - 根因：Tauri 2 skipTaskbar 在 Windows 未设置 WS_EX_TOOLWINDOW（实测 EX_APPWINDOW=True，Alt+Tab 不遵守 skipTaskbar）
+  - make_tool_window：SetWindowLongPtr 加 WS_EX_TOOLWINDOW(0x80) 清 WS_EX_APPWINDOW(0x40000) + SWP_FRAMECHANGED
+  - 坑：wry/Tauri 在窗口 show 时重置 exstyle（仅音频面板被 show 过所以它失败）→ poll_loop 每 25 tick（2 秒）兜底修复，开销可忽略
+  - 实测：三窗口 TOOL=True APP=False，关闭/重开循环后保持
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.4
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -211,8 +217,8 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.3（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.3）
-- 工作区 git 干净，main 与远端同步（最后 commit `4657e4a`）
+- 最新版本：v0.16.4（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.4）
+- 工作区 git 干净，main 与远端同步（最后 commit `9361cda`）
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
@@ -241,6 +247,7 @@
 - SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation；SourceAppUserModelId 是 AUMID（用 AppInfo::GetFromAppUserModelId 查显示名，feature ApplicationModel）
 - 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
 - 透明辅助窗口「虚框」终案：SetWindowRgn 圆角裁剪窗口区域 + shadow:false + 无 border/外阴影（见 v0.16.2）
+- Tauri 2 skipTaskbar 在 Windows 不设 WS_EX_TOOLWINDOW（Alt+Tab 仍显示）→ Rust 侧强制 TOOLWINDOW + 轮询兜底（wry show 会重置 exstyle，见 v0.16.4）
 - CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）、窗口状态与 GetWindowRgn；PowerShell 写 JSON 用 [IO.File]::WriteAllText + UTF8Encoding($false) 防 BOM
 
 **新会话快速恢复**
