@@ -65,6 +65,12 @@
   - 应用名：SMTC 的 SourceAppUserModelId 是 AUMID（AppleInc.AppleMusicWin_xxx!App）→ windows::ApplicationModel::AppInfo::GetFromAppUserModelId 查询 DisplayName（"Apple Music"）；副标题改「歌手 · 专辑」优先（MediaState 新增 album 字段）
   - 实测：Apple Music 显示「刘惜君 & 薛之谦 — 尘」✓ 换歌实时更新 ✓
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.1
+- 2026-08-18 v0.16.2 彻底消除辅助窗口虚框（用户反馈 v0.16.1 仍虚框）
+  - 终案：SetWindowRgn 圆角裁剪——audio-panel/ai-popup/pet-window 窗口区域直接切成圆角（CreateRoundRectRgn + SetWindowRgn，物理像素 r=逻辑12×scale，ai-popup resize 后经 on_window_event Resized 重设）；圆角外不参与绘制，系统阴影/合成边缘全部无从谈起（实测 GetWindowRgn=COMPLEXREGION）
+  - shadow: false：三个辅助窗口关闭系统阴影（透明窗口 + DWM 阴影 = 矩形虚影框）
+  - 面板精简：无 border、无外 box-shadow、inset 0 铺满，仅 inset 高光（inset 阴影窗口内渲染不裁剪）
+  - 坑：tauri hwnd() 返回 windows crate HWND 元组结构体（解包 .0 为 *mut c_void 供 windows-sys）；PowerShell 批量改版本号时 Set-Content -Encoding UTF8 写 BOM 会破坏 JSON（用 [IO.File]::WriteAllText + UTF8Encoding($false)）
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.2
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -202,8 +208,8 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.1（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.1）
-- 工作区 git 干净，main 与远端同步（最后 commit `04eebcf`）
+- 最新版本：v0.16.2（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.2）
+- 工作区 git 干净，main 与远端同步（最后 commit `61f507e`）
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
@@ -231,7 +237,8 @@
 - WASAPI loopback：GetMixFormat 的 WAVEFORMATEXTENSIBLE 必须完整复制（头部+cbSize）再 Initialize，否则 E_INVALIDARG；波形采集以能量驱动（不依赖 SMTC playing，SoundPlayer 等不注册 SMTC 也能出波形）
 - SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation；SourceAppUserModelId 是 AUMID（用 AppInfo::GetFromAppUserModelId 查显示名，feature ApplicationModel）
 - 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
-- CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）与窗口状态
+- 透明辅助窗口「虚框」终案：SetWindowRgn 圆角裁剪窗口区域 + shadow:false + 无 border/外阴影（见 v0.16.2）
+- CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）、窗口状态与 GetWindowRgn；PowerShell 写 JSON 用 [IO.File]::WriteAllText + UTF8Encoding($false) 防 BOM
 
 **新会话快速恢复**
 1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`
