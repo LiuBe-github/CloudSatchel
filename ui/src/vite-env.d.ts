@@ -34,9 +34,6 @@ export interface AppState {
   audioPanelEnabled: boolean; // 音频识别面板开关（默认开）
   audioPanelX: number; // 音频面板位置 X（物理像素，-1 = 未设置）
   audioPanelY: number; // 音频面板位置 Y
-  petEnabled: boolean; // 虚拟桌宠开关（默认关）
-  petX: number; // 桌宠位置 X（物理像素，-1 = 未设置）
-  petY: number; // 桌宠位置 Y
   fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
   animating: boolean;

@@ -3,7 +3,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import AiPopup from "./components/AiPopup";
 import AudioPanel from "./components/AudioPanel";
-import PetWindow from "./components/PetWindow";
 import { inTauri } from "./lib/bridge";
 import "./styles.css";
 
@@ -15,8 +14,6 @@ createRoot(document.getElementById("root")!).render(
     <AiPopup />
   ) : label === "audio-panel" ? (
     <AudioPanel />
-  ) : label === "pet-window" ? (
-    <PetWindow />
   ) : (
     <App />
   ),

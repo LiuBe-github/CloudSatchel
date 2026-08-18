@@ -40,9 +40,9 @@ use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetCursorPos, GetWindow, GetWindowLongW, GetWindowPlacement,
-    GetWindowRect, GetWindowTextW, IsIconic, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE,
-    GW_OWNER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED,
-    WS_EX_TOOLWINDOW, WINDOWPLACEMENT,
+    GetWindowRect, IsIconic, IsWindowVisible, MoveWindow, ShowWindow, GWL_EXSTYLE, GW_OWNER,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, SW_SHOWMAXIMIZED, WS_EX_TOOLWINDOW,
+    WINDOWPLACEMENT,
 };
 
 use crate::dlog;
@@ -427,14 +427,6 @@ unsafe extern "system" fn collect_cb(hwnd: HWND, lparam: LPARAM) -> i32 {
             cls.as_str(),
             "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
         ) {
-            return 1;
-        }
-    }
-    // 桌宠窗口（FR-16）不最小化：随隐私序列隐藏/还原由 poll_loop 按 privacy_active 联动
-    let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), 128);
-    if n > 0 {
-        let title = String::from_utf16_lossy(&buf[..n as usize]);
-        if title == "云笈桌宠" {
             return 1;
         }
     }

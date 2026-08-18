@@ -4,10 +4,10 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.16.0
+- 当前版本：v0.17.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.12）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.13）
 
 ## 已实现功能
 
@@ -26,10 +26,15 @@
 - **开关状态记忆：上次关闭时的所有功能开关与设置自动恢复，启动即应用效果**
 - **隐私老板键（v0.13.0）：全局热键立即触发/恢复隐私序列**
 - **AI 小窗（v0.14.0）：全局快捷键呼出小型 AI 问答窗**
-- **音频识别（v0.15.0）：右下角媒体面板，SMTC 控制 + WASAPI 波形**
-- **虚拟桌宠（v0.16.0）：CSS 自绘桌面精灵，拖拽与菜单**
+- **音频识别（v0.15.0）：右下角媒体面板，SMTC 控制 + WASAPI 波形；v0.17.0 起为主界面功能列表项（不再在设置面板）**
 
 ## 最近完成
+
+- 2026-08-18 v0.17.0 移除虚拟桌宠 + 音频识别移入功能列表
+  - **删除桌宠全部功能**（用户明确不需要）：pet-window 窗口、PetWindow.tsx、set_pet_enabled/set_pet_position、prefs pet_* 字段、poll_loop 隐私联动、privacy.rs collect_cb 桌宠跳过、CSS .pet-* 样式、FEATURES 桌宠项
+  - **音频识别从设置面板移入主界面功能列表**（第 6 项卡片，handleToggle 走 set_audio_panel_enabled）：SettingsPanel 删除「音频识别」分组与 props
+  - 需求文档 v1.13：删除 4.16 虚拟桌宠章节（4.17→4.16、4.18→4.17），SC 场景/持久化表/NFR-35/技术架构/工程约定/第 8 节同步清理
+  - 实测：功能列表 = 双击隐藏图标 | 任务栏 | 性能监控 | 隐私 | AI 助手 | 音频识别；窗口数 3（pet-window 已消失）
 
 - 2026-08-18 v0.13.0 隐私老板键（FR-13 扩展）
   - 新模块 [src-tauri/src/hotkey.rs](src-tauri/src/hotkey.rs)：通用全局热键（RegisterHotKey + 独立消息循环线程 + MOD_NOREPEAT 防连发 + 注册结果回执），老板键与 AI 小窗共用
@@ -53,13 +58,6 @@
   - windows crate 0.61 需加 features：Media_Control、Media_MediaProperties、Foundation（SMTC）；PlaybackStatus 在 PlaybackInfo 上，IsNextEnabled 等在 playback.Controls() 上
   - 自动化实测：SMTC 真实会话（Apple Music 标题/艺术家/进度）✓ 播放波形跳动 ✓ 窗口右下角定位 ✓
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.15.0
-- 2026-08-18 v0.16.0 虚拟桌宠（FR-16）
-  - pet-window 透明置顶小窗（140×160）；精灵为 CSS 自绘「竹灵小猫」（呼吸/眨眼/尾巴/阴影动画），无第三方素材无版权风险
-  - 左键拖拽（data-tauri-drag-region）位置持久化；双击/右键弹出小菜单（隐藏桌宠/退出桌宠）
-  - 隐私联动：poll_loop 检测 privacy_active 变化 → hide/show pet 窗口；privacy.rs collect_cb 按标题「云笈桌宠」跳过（避免被最小化与 hide 冲突）
-  - 功能列表第 6 项「虚拟桌宠」卡片（默认关闭）；capabilities windows 列表需含 pet-window
-  - 自动化实测：显示定位 ✓ 精灵渲染 ✓ 拖拽持久化（settings.json petX/petY）✓ 双击菜单 ✓ 隐私触发隐藏/恢复还原 ✓
-  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.0
 - 2026-08-18 v0.16.1 音频面板修复（用户反馈）
   - 虚框：透明窗口上 backdrop-filter 产生矩形边缘伪影（模糊采样窗口外内容失败）→ 移除 blur，用高不透明度背景 + 边框高光模拟玻璃感；面板 inset 12px 留阴影空间（窗口 320×108→344×132）；AI 小窗同步（400×520→420×540，shell inset 10px）；pet-menu 去 blur
   - 应用名：SMTC 的 SourceAppUserModelId 是 AUMID（AppleInc.AppleMusicWin_xxx!App）→ windows::ApplicationModel::AppInfo::GetFromAppUserModelId 查询 DisplayName（"Apple Music"）；副标题改「歌手 · 专辑」优先（MediaState 新增 album 字段）
@@ -222,8 +220,8 @@
 - 性能监控关闭后立即停止采样；开关状态随 settings.json 持久化，启动时若上次为开则自动恢复采样
 - 设置持久化：开关与背景设置统一存 `%LOCALAPPDATA%\CloudSatchel\settings.json`（prefs 模块，原子写入），变更实时保存、启动自动恢复；运行时状态（图标隐藏/动画/全屏叠加）不入盘
 - 全局热键统一走 hotkey.rs（RegisterHotKey + MOD_NOREPEAT），注册失败降级提示，不影响其他功能
-- 辅助窗口（ai-popup / audio-panel / pet-window）：关闭=隐藏不销毁；前端 window 操作需在 capabilities 配置权限；on_window_event 按 label 分支
-- 多窗口路由：main.tsx 按 getCurrentWindow().label 渲染 App / AiPopup / AudioPanel / PetWindow
+- 辅助窗口（ai-popup / audio-panel）：关闭=隐藏不销毁；前端 window 操作需在 capabilities 配置权限；on_window_event 按 label 分支
+- 多窗口路由：main.tsx 按 getCurrentWindow().label 渲染 App / AiPopup / AudioPanel
 - Release 资产统一英文名：`CloudSatchel_<版本>_x64-setup.exe`
 
 ## 待办 / 可继续方向
@@ -231,34 +229,25 @@
 - 如需要，可补充 CPU/GPU 温度等传感器不可用时的状态提示
 - 可增加性能监控采集日志开关
 - dlog.rs 临时调试日志移除/加开关（hooks-debug.log 持续增长）
-- 需求文档第 10 节迭代建议剩余项：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化与导出 / 音频面板音量歌词 / 桌宠更多外观
+- 需求文档第 10 节迭代建议剩余项：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化与导出 / 音频面板音量歌词
 - 后续版本继续同步 Cargo、Tauri、前端 package 和 About 版本号
-
-## 待解决（进行中）
-
-**音频面板「点击弹出标题框」——v0.16.15 已修复，待用户实测确认**
-- 现象：用户真实鼠标点击音频面板时，窗口顶部出现灰色 caption 带（含「音频面板」标题文字，透在半透明背景后面）；失焦不出现；本地编程激活不出现
-- 根因：激活时 DWM 合成 caption 到窗面非客户区 + 面板 82% 半透明背景透出；样式/NC 消息层全程干净，无法从样式层阻止
-- 修复（v0.16.15）：audio-panel/pet-window `focusable:false`（WS_EX_NOACTIVATE，永不激活）+ aux_wnd_proc 吞 WM_NCACTIVATE/WM_NCPAINT + 移除截屏调试代码
-- 注意：v0.16.7~v0.16.15 均为本地调试版（未推送、未发布）；v0.16.7 的 GitHub Release 是草稿状态；git 有大量未提交改动；**用户确认修复后**再统一提交/推送/发布
 
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新**已发布**版本：v0.16.6（https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6）
-- **本地调试版**（未推送/未发布）：v0.16.7 ~ v0.16.15（v0.16.15 = 音频面板标题框终案，待用户实测确认）；v0.16.7 GitHub Release 为草稿
-- git 状态：main 与远端同步至 `c6ed017`（v0.16.6）；v0.16.7+ 改动全部未提交（用户要求确认修复后再推送）
-- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
+- 最新已发布：v0.16.15（标题框终案，https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.15）
+- **本地待推送**：v0.17.0（移除桌宠 + 音频识别移入功能列表，已构建待用户确认后推送）
+- git 状态：main 与远端同步至 `9a1709e`（v0.16.15）；v0.17.0 改动未提交
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表
 
 **需求文档当前状态**
-- `CloudSatchel需求文档.md`（根目录，v1.12）：FR-01~FR-13、FR-15~FR-18 全部已实现；v0.12.0 规划范围（托盘快捷开关 / 老板键 / AI 小窗 / 音频识别 / 桌宠）全部交付
-- 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展 / 桌宠外观扩展
+- `CloudSatchel需求文档.md`（根目录，v1.13）：FR-01~FR-13、FR-15、FR-17、FR-18 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别为主界面功能列表项
+- 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展
 
 **待用户验证事项**
 - v0.12.1 TranslucentTB 弹窗修复：需在出问题的那台机器上验证（反复开关透明任务栏不再弹"请重启 Windows"）
-- v0.13.0+ 老板键 / AI 小窗 / 音频识别 / 桌宠：自动化已覆盖核心链路，真实桌面体验待用户确认
+- v0.13.0+ 老板键 / AI 小窗 / 音频识别：自动化已覆盖核心链路，真实桌面体验待用户确认
   - AI 小窗对话（需配置 Key）与音频面板控制（真实播放器 SMTC 控制按钮）
-  - 桌宠拖拽手感与菜单交互
 - AI 助手对话（v0.11.x）：用户配置 DeepSeek/OpenAI 实测
 
 **遗留小问题**
