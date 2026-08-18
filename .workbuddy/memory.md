@@ -4,10 +4,10 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.10.0
+- 当前版本：v0.16.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.12）
 
 ## 已实现功能
 
@@ -24,8 +24,42 @@
 - 设置面板与关于面板
 - 单实例保护与异常恢复
 - **开关状态记忆：上次关闭时的所有功能开关与设置自动恢复，启动即应用效果**
+- **隐私老板键（v0.13.0）：全局热键立即触发/恢复隐私序列**
+- **AI 小窗（v0.14.0）：全局快捷键呼出小型 AI 问答窗**
+- **音频识别（v0.15.0）：右下角媒体面板，SMTC 控制 + WASAPI 波形**
+- **虚拟桌宠（v0.16.0）：CSS 自绘桌面精灵，拖拽与菜单**
 
 ## 最近完成
+
+- 2026-08-18 v0.13.0 隐私老板键（FR-13 扩展）
+  - 新模块 [src-tauri/src/hotkey.rs](src-tauri/src/hotkey.rs)：通用全局热键（RegisterHotKey + 独立消息循环线程 + MOD_NOREPEAT 防连发 + 注册结果回执），老板键与 AI 小窗共用
+  - privacy.rs：BOSS_TRIGGERED 状态——老板键触发后鼠标/键盘不恢复（仅老板键/关开关/退出可恢复）；触发/恢复复用现有序列
+  - 默认 Ctrl+`，设置面板可自定义并持久化（prefs.privacy_boss_key）；注册失败提示并降级仅空闲触发
+  - 自动化实测：热键占用探测 err=1409 ✓ 老板键切换 ✓ 老板键模式鼠标不恢复 ✓ 空闲触发后真实输入恢复 ✓
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.13.0
+- 2026-08-18 v0.14.0 AI 小窗（FR-17）
+  - tauri.conf 新增 ai-popup 窗口（400×520 无边框透明置顶）；前端按窗口 label 路由（main.tsx）
+  - 默认 Ctrl+Shift+Space 切换呼出/隐藏；复用 FR-15 Key/模型/BaseURL；关闭（隐藏）即清空对话不落盘（后端 hide 时 emit ai-popup-cleared）
+  - 设置面板「AI 小窗」分组：开关 + 快捷键自定义（持久化）
+  - 关键：on_window_event 区分窗口 label——ai-popup 关闭 = 隐藏（不触发退出清理）；Destroyed 清理仅 main
+  - 自动化实测：热键占用 ✓ 呼出 ✓ 再按隐藏 ✓
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.14.0
+- 2026-08-18 v0.15.0 音频识别（FR-18）
+  - 新模块 [src-tauri/src/audio.rs](src-tauri/src/audio.rs)：SMTC（GlobalSystemMediaTransportControlsSessionManager）读会话 + 控制；WASAPI loopback + 512 点 FFT → 16 档对数频段能量
+  - 波形能量驱动：有声音即采集，静音约 2 秒释放采集客户端（低开销）；不依赖 SMTC playing 状态（SoundPlayer 等不注册 SMTC 的播放器也能出波形）
+  - 面板窗口 audio-panel（320×108 液态玻璃），默认右下角（可拖拽持久化），无播放淡出、全屏隐藏（复用 snapshot.fullscreen_active——本轮把 fullscreen_active 加入 Snapshot）
+  - **Tauri 2 ACL 坑**：辅助窗口的 show/hide/setPosition 等前端 window 操作被 capabilities 拒绝（"not allowed by ACL"）；需在 app.security.capabilities 配置 core:window:allow-show/hide/set-position/set-focus/set-size（core:window:default 只含只读查询）；**capabilities 位置在 app.security 下**（不在顶层/app 直接子属性）
+  - **WASAPI 坑**：GetMixFormat 通常返回 WAVEFORMATEXTENSIBLE，只复制 WAVEFORMATEX 头部（18 字节）会导致 Initialize E_INVALIDARG；必须完整复制头部+cbSize 字节再传指针
+  - windows crate 0.61 需加 features：Media_Control、Media_MediaProperties、Foundation（SMTC）；PlaybackStatus 在 PlaybackInfo 上，IsNextEnabled 等在 playback.Controls() 上
+  - 自动化实测：SMTC 真实会话（Apple Music 标题/艺术家/进度）✓ 播放波形跳动 ✓ 窗口右下角定位 ✓
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.15.0
+- 2026-08-18 v0.16.0 虚拟桌宠（FR-16）
+  - pet-window 透明置顶小窗（140×160）；精灵为 CSS 自绘「竹灵小猫」（呼吸/眨眼/尾巴/阴影动画），无第三方素材无版权风险
+  - 左键拖拽（data-tauri-drag-region）位置持久化；双击/右键弹出小菜单（隐藏桌宠/退出桌宠）
+  - 隐私联动：poll_loop 检测 privacy_active 变化 → hide/show pet 窗口；privacy.rs collect_cb 按标题「云笈桌宠」跳过（避免被最小化与 hide 冲突）
+  - 功能列表第 6 项「虚拟桌宠」卡片（默认关闭）；capabilities windows 列表需含 pet-window
+  - 自动化实测：显示定位 ✓ 精灵渲染 ✓ 拖拽持久化（settings.json petX/petY）✓ 双击菜单 ✓ 隐私触发隐藏/恢复还原 ✓
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.0
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -147,28 +181,35 @@
 - 任何耗时 Win32 操作使用 async + spawn_blocking 或后台线程
 - 性能监控关闭后立即停止采样；开关状态随 settings.json 持久化，启动时若上次为开则自动恢复采样
 - 设置持久化：开关与背景设置统一存 `%LOCALAPPDATA%\CloudSatchel\settings.json`（prefs 模块，原子写入），变更实时保存、启动自动恢复；运行时状态（图标隐藏/动画/全屏叠加）不入盘
+- 全局热键统一走 hotkey.rs（RegisterHotKey + MOD_NOREPEAT），注册失败降级提示，不影响其他功能
+- 辅助窗口（ai-popup / audio-panel / pet-window）：关闭=隐藏不销毁；前端 window 操作需在 capabilities 配置权限；on_window_event 按 label 分支
+- 多窗口路由：main.tsx 按 getCurrentWindow().label 渲染 App / AiPopup / AudioPanel / PetWindow
 - Release 资产统一英文名：`CloudSatchel_<版本>_x64-setup.exe`
 
 ## 待办 / 可继续方向
 
 - 如需要，可补充 CPU/GPU 温度等传感器不可用时的状态提示
 - 可增加性能监控采集日志开关
+- dlog.rs 临时调试日志移除/加开关（hooks-debug.log 持续增长）
+- 需求文档第 10 节迭代建议剩余项：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化与导出 / 音频面板音量歌词 / 桌宠更多外观
 - 后续版本继续同步 Cargo、Tauri、前端 package 和 About 版本号
 
-## 会话交接状态（2026-08-15 创建，供新会话"读取记忆"恢复上下文）
+## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.12.1（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.12.1）
-- 工作区 git 干净，main 与远端同步（最后 commit `6619995`）
-- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复
+- 最新版本：v0.16.0（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.0）
+- 工作区 git 干净，main 与远端同步（最后 commit `3250a22`）
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.0 虚拟桌宠
 
 **需求文档当前状态**
-- `CloudSatchel需求文档.md`（根目录，v1.10）：FR-01~FR-13、FR-15 全部已实现；v0.12.0 规划（托盘快捷开关）已实现
-- 文档第 10 节迭代建议中**未实现**：① 设置项说明与引导 ② 日志开关 ③ 背景图缓存优化 ④ 不同 Win 版本能力说明 ⑤ 强化冒烟测试 ⑥ 隐私操作「立即触发」快捷键/托盘项 ⑦ 隐私恢复后托盘气泡 ⑧（已实现 BaseURL）⑨ AI 对话历史持久化与导出
+- `CloudSatchel需求文档.md`（根目录，v1.12）：FR-01~FR-13、FR-15~FR-18 全部已实现；v0.12.0 规划范围（托盘快捷开关 / 老板键 / AI 小窗 / 音频识别 / 桌宠）全部交付
+- 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展 / 桌宠外观扩展
 
 **待用户验证事项**
 - v0.12.1 TranslucentTB 弹窗修复：需在出问题的那台机器上验证（反复开关透明任务栏不再弹"请重启 Windows"）
-- 托盘快捷开关（v0.12.0）：勾选同步、点击切换、重启保持
+- v0.13.0+ 老板键 / AI 小窗 / 音频识别 / 桌宠：自动化已覆盖核心链路，真实桌面体验待用户确认
+  - AI 小窗对话（需配置 Key）与音频面板控制（真实播放器 SMTC 控制按钮）
+  - 桌宠拖拽手感与菜单交互
 - AI 助手对话（v0.11.x）：用户配置 DeepSeek/OpenAI 实测
 
 **遗留小问题**
@@ -181,6 +222,10 @@
 - tauri::command 宏对 pub fn 报 E0255（command 保持普通 fn，子模块可直接调用）
 - CSS 必须用 :root 已定义主题变量（--color-paper/ink/bamboo 系列）
 - settings.json 读取代容忍 UTF-8 BOM；前端 build 在沙箱需 danger-full-access（Node 子进程 EPERM）
+- Tauri 2 ACL：前端 window 操作（show/hide/setPosition）需 app.security.capabilities 配置 core:window:allow-*；core:window:default 只含只读查询；每个辅助窗口都要列入 windows 列表
+- WASAPI loopback：GetMixFormat 的 WAVEFORMATEXTENSIBLE 必须完整复制（头部+cbSize）再 Initialize，否则 E_INVALIDARG；波形采集以能量驱动（不依赖 SMTC playing，SoundPlayer 等不注册 SMTC 也能出波形）
+- SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation
+- CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）与窗口状态
 
 **新会话快速恢复**
 1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`
