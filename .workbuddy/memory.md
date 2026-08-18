@@ -154,3 +154,34 @@
 - 如需要，可补充 CPU/GPU 温度等传感器不可用时的状态提示
 - 可增加性能监控采集日志开关
 - 后续版本继续同步 Cargo、Tauri、前端 package 和 About 版本号
+
+## 会话交接状态（2026-08-15 创建，供新会话"读取记忆"恢复上下文）
+
+**当前版本与发布**
+- 最新版本：v0.12.1（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.12.1）
+- 工作区 git 干净，main 与远端同步（最后 commit `6619995`）
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复
+
+**需求文档当前状态**
+- `CloudSatchel需求文档.md`（根目录，v1.10）：FR-01~FR-13、FR-15 全部已实现；v0.12.0 规划（托盘快捷开关）已实现
+- 文档第 10 节迭代建议中**未实现**：① 设置项说明与引导 ② 日志开关 ③ 背景图缓存优化 ④ 不同 Win 版本能力说明 ⑤ 强化冒烟测试 ⑥ 隐私操作「立即触发」快捷键/托盘项 ⑦ 隐私恢复后托盘气泡 ⑧（已实现 BaseURL）⑨ AI 对话历史持久化与导出
+
+**待用户验证事项**
+- v0.12.1 TranslucentTB 弹窗修复：需在出问题的那台机器上验证（反复开关透明任务栏不再弹"请重启 Windows"）
+- 托盘快捷开关（v0.12.0）：勾选同步、点击切换、重启保持
+- AI 助手对话（v0.11.x）：用户配置 DeepSeek/OpenAI 实测
+
+**遗留小问题**
+- dlog.rs 是临时调试日志（hooks 每点击写 FIRST/DBLCLK 多行），产品发布前应移除或加开关（记忆原话"确认修复后应移除"）
+- hooks-debug.log 会持续增长
+
+**已知技术坑（详见各版本记录）**
+- Win11 25H2：ABM_SETSTATE 不隐藏任务栏（用 ShowWindow+轮询）；SetWindowPos 移任务栏被系统拉回（动画用 alpha 渐变）
+- TranslucentTB 弹窗 = 文件时间戳比 temp 副本新（引擎文件固定 2000-01-01 时间戳解决）
+- tauri::command 宏对 pub fn 报 E0255（command 保持普通 fn，子模块可直接调用）
+- CSS 必须用 :root 已定义主题变量（--color-paper/ink/bamboo 系列）
+- settings.json 读取代容忍 UTF-8 BOM；前端 build 在沙箱需 danger-full-access（Node 子进程 EPERM）
+
+**新会话快速恢复**
+1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`
+2. 即可继续开发/修 bug；发布流程：`npm run release`（一键构建+重命名安装包）→ git tag/push → gh release create（GH_TOKEN 从 `git credential fill` 提取）
