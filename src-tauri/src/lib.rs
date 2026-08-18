@@ -334,6 +334,51 @@ fn activate_existing_window() {
     }
 }
 
+/// 把窗口区域裁剪为圆角（SetWindowRgn）——透明辅助窗口专用。
+///
+/// 目的：Windows 上透明窗口即使内容带 CSS 圆角，窗口本身仍是矩形，
+/// 系统阴影 / 合成边缘可能在圆角外留下「虚框」痕迹；
+/// SetWindowRgn 直接把窗口区域切成圆角，圆角外不参与任何绘制，彻底消除虚框。
+/// 注意：SetWindowRgn 接管 region 句柄所有权（本函数不释放）；
+/// 窗口尺寸变化后需要重新调用（ai-popup 可 resize，监听 Resized 重设）。
+#[cfg(target_os = "windows")]
+fn apply_rounded_corners(window: &tauri::WebviewWindow, radius_logical: f64) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    use tauri::Manager;
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    // tauri 的 hwnd() 返回 windows crate 的 HWND 元组结构体，解包为裸指针供 windows-sys 使用
+    let hwnd: *mut core::ffi::c_void = hwnd.0;
+    unsafe {
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetWindowRect(hwnd, &mut rect) == 0 {
+            return;
+        }
+        let w = rect.right - rect.left;
+        let h = rect.bottom - rect.top;
+        if w <= 0 || h <= 0 {
+            return;
+        }
+        // 逻辑圆角 → 物理像素（GetWindowRect 返回物理像素）
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let r = ((radius_logical * scale) as i32).clamp(1, w / 2);
+        let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
+        if !rgn.is_null() {
+            // SetWindowRgn 成功后 region 归窗口系统所有，勿 DeleteObject
+            SetWindowRgn(hwnd, rgn, 1);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tauri Commands（前端 invoke 调用）
 // ---------------------------------------------------------------------------
@@ -1124,6 +1169,12 @@ pub fn run() {
             sync_idle(&state);
             privacy::start();
             let app_handle = app.handle().clone();
+            // 辅助窗口圆角裁剪（透明窗口消除矩形虚框边缘）
+            for label in ["ai-popup", "audio-panel", "pet-window"] {
+                if let Some(win) = app.get_webview_window(label) {
+                    apply_rounded_corners(&win, 12.0);
+                }
+            }
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
             let _ = sync_boss_key(&app_handle, &state);
             // AI 小窗热键跟随开关恢复注册（默认开；注册失败仅降级为不可呼出）
@@ -1143,6 +1194,14 @@ pub fn run() {
                 // 仅主窗口销毁时执行退出清理（AI 小窗等辅助窗口隐藏而非销毁，不触发）
                 if window.label() == "main" {
                     cleanup_on_exit(window.app_handle());
+                }
+            }
+            tauri::WindowEvent::Resized(_) => {
+                // 可调整大小的辅助窗口（AI 小窗）尺寸变化后重设圆角区域
+                if window.label() == "ai-popup" {
+                    if let Some(win) = window.app_handle().get_webview_window("ai-popup") {
+                        apply_rounded_corners(&win, 12.0);
+                    }
                 }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
