@@ -6,7 +6,7 @@ interface AboutPanelProps {
   onClose: () => void;
 }
 
-const APP_VERSION = "v0.16.2";
+const APP_VERSION = "v0.16.3";
 
 /** 关于面板：显示软件基本信息（花笺 Floral 式侧边面板） */
 export function AboutPanel({ open, onClose }: AboutPanelProps) {

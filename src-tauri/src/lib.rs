@@ -791,8 +791,12 @@ fn set_audio_panel_enabled(
         *e = enabled;
     }
     audio::set_enabled(enabled);
-    if !enabled {
-        if let Some(win) = app.get_webview_window("audio-panel") {
+    if let Some(win) = app.get_webview_window("audio-panel") {
+        if enabled {
+            // 重新打开：恢复窗口显示（无播放时前端自动淡出，播放时出现）
+            let _ = win.show();
+            let _ = win.unminimize();
+        } else {
             let _ = win.hide();
         }
     }
