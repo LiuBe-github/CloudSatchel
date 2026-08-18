@@ -9,6 +9,8 @@ import {
   setPrivacyEnabled,
   setPrivacyIdleSecs,
   setPrivacyBossKey,
+  setAiPopupEnabled,
+  setAiPopupHotkey,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -103,6 +105,9 @@ function App({ initial }: AppProps) {
       privacyActive: false,
       privacyBossKey: "Ctrl+`",
       bossKeyRegistered: false,
+      aiPopupEnabled: true,
+      aiPopupHotkey: "Ctrl+Shift+Space",
+      aiPopupRegistered: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
       aiModel: "gpt-4o-mini",
@@ -254,6 +259,23 @@ function App({ initial }: AppProps) {
     const next = await setPrivacyBossKey(key);
     setState(next);
     toastRef.current?.show("老板键已更新");
+  }, []);
+
+  const handleAiPopupEnabledChange = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setAiPopupEnabled(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "AI 小窗已开启" : "AI 小窗已关闭");
+    } catch (err) {
+      console.error("切换 AI 小窗失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleAiPopupHotkeyChange = useCallback(async (key: string) => {
+    const next = await setAiPopupHotkey(key);
+    setState(next);
+    toastRef.current?.show("AI 小窗快捷键已更新");
   }, []);
 
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
@@ -422,7 +444,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.13.0</div>
+          <div className="sidebar-version">v0.14.0</div>
           </div>
         </aside>
 
@@ -540,6 +562,11 @@ function App({ initial }: AppProps) {
           privacyBossKey={state.privacyBossKey}
           bossKeyRegistered={state.bossKeyRegistered}
           onBossKeyChange={handleBossKeyChange}
+          aiPopupEnabled={state.aiPopupEnabled}
+          aiPopupHotkey={state.aiPopupHotkey}
+          aiPopupRegistered={state.aiPopupRegistered}
+          onAiPopupEnabledChange={handleAiPopupEnabledChange}
+          onAiPopupHotkeyChange={handleAiPopupHotkeyChange}
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

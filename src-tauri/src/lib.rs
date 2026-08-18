@@ -56,6 +56,9 @@ pub(crate) struct AppState {
     ai_base_url: Mutex<String>,      // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
     privacy_boss_key: Mutex<String>, // 隐私老板键（FR-13 扩展，默认 Ctrl+`）
     boss_key_registered: Mutex<bool>, // 老板键热键当前是否注册成功（运行时状态，不入盘）
+    ai_popup_enabled: Mutex<bool>,   // AI 小窗（FR-17）开关（默认开）
+    ai_popup_hotkey: Mutex<String>,  // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
+    ai_popup_registered: Mutex<bool>, // AI 小窗热键当前是否注册成功（运行时状态，不入盘）
 }
 
 impl Default for AppState {
@@ -82,6 +85,9 @@ impl Default for AppState {
             ai_base_url: Mutex::new(ai::DEFAULT_BASE_URL.to_string()),
             privacy_boss_key: Mutex::new("Ctrl+`".to_string()),
             boss_key_registered: Mutex::new(false),
+            ai_popup_enabled: Mutex::new(true),
+            ai_popup_hotkey: Mutex::new("Ctrl+Shift+Space".to_string()),
+            ai_popup_registered: Mutex::new(false),
         }
     }
 }
@@ -106,6 +112,9 @@ struct Snapshot {
     ai_base_url: String,
     privacy_boss_key: String,
     boss_key_registered: bool,
+    ai_popup_enabled: bool,
+    ai_popup_hotkey: String,
+    ai_popup_registered: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -135,6 +144,9 @@ fn snapshot(state: &AppState) -> Snapshot {
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
         boss_key_registered: *state.boss_key_registered.lock().unwrap(),
+        ai_popup_enabled: *state.ai_popup_enabled.lock().unwrap(),
+        ai_popup_hotkey: state.ai_popup_hotkey.lock().unwrap().clone(),
+        ai_popup_registered: *state.ai_popup_registered.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -164,6 +176,8 @@ fn persist(state: &AppState) {
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
+        ai_popup_enabled: *state.ai_popup_enabled.lock().unwrap(),
+        ai_popup_hotkey: state.ai_popup_hotkey.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -456,6 +470,44 @@ fn sync_boss_key(app: &AppHandle, state: &std::sync::Arc<AppState>) -> Result<()
     }
 }
 
+/// AI 小窗全局热键 id
+const AI_POPUP_HOTKEY_ID: i32 = 0x1701;
+
+/// 同步 AI 小窗热键注册：跟随「AI 小窗」开关（FR-17）。
+/// 热键按下切换小窗显示/隐藏；注册失败返回 Err（前端提示，降级为不可呼出）。
+fn sync_ai_popup(app: &AppHandle, state: &std::sync::Arc<AppState>) -> Result<(), String> {
+    let enabled = *state.ai_popup_enabled.lock().unwrap();
+    if !enabled {
+        hotkey::unregister(AI_POPUP_HOTKEY_ID);
+        *state.ai_popup_registered.lock().unwrap() = false;
+        return Ok(());
+    }
+    let spec_str = state.ai_popup_hotkey.lock().unwrap().clone();
+    let spec = hotkey::parse_hotkey(&spec_str)
+        .ok_or_else(|| format!("快捷键格式无效：{spec_str}（示例：Ctrl+Shift+Space）"))?;
+    let app2 = app.clone();
+    let ok = hotkey::register(AI_POPUP_HOTKEY_ID, spec, move || {
+        if let Some(win) = app2.get_webview_window("ai-popup") {
+            if win.is_visible().unwrap_or(false) {
+                // 隐藏并通知前端清空对话上下文（不落盘）
+                let _ = app2.emit("ai-popup-cleared", ());
+                let _ = win.hide();
+            } else {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+                let _ = app2.emit("ai-popup-shown", ());
+            }
+        }
+    });
+    *state.ai_popup_registered.lock().unwrap() = ok;
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("快捷键注册失败：{spec_str}（可能被其他程序占用）"))
+    }
+}
+
 #[tauri::command]
 fn set_privacy_enabled(
     app: AppHandle,
@@ -585,6 +637,63 @@ fn set_ai_base_url(
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
+}
+
+/// 开关 AI 小窗（FR-17）：关闭后快捷键失效且小窗不可呼出，不影响 FR-15 主 AI 助手
+#[tauri::command]
+fn set_ai_popup_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.ai_popup_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    if !enabled {
+        // 关闭时隐藏已打开的小窗并清空对话上下文
+        let _ = app.emit("ai-popup-cleared", ());
+        if let Some(win) = app.get_webview_window("ai-popup") {
+            let _ = win.hide();
+        }
+    }
+    let _ = sync_ai_popup(&app, &state);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置 AI 小窗呼出快捷键（FR-17）：解析成功 → 持久化 → 立即重新注册；失败回滚旧键
+#[tauri::command]
+fn set_ai_popup_hotkey(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    key: String,
+) -> Result<Snapshot, String> {
+    let key = key.trim().to_string();
+    hotkey::parse_hotkey(&key)
+        .ok_or_else(|| format!("快捷键格式无效：{key}（示例：Ctrl+Shift+Space）"))?;
+    let old = state.ai_popup_hotkey.lock().unwrap().clone();
+    *state.ai_popup_hotkey.lock().unwrap() = key.clone();
+    persist(&state);
+    match sync_ai_popup(&app, &state) {
+        Ok(()) => {
+            let snap = snapshot(&state);
+            let _ = app.emit("state-updated", snap.clone());
+            Ok(snap)
+        }
+        Err(e) => {
+            *state.ai_popup_hotkey.lock().unwrap() = old;
+            persist(&state);
+            let _ = sync_ai_popup(&app, &state);
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -800,6 +909,8 @@ pub fn run() {
     *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
     *state.ai_base_url.lock().unwrap() = prefs.ai_base_url.clone();
     *state.privacy_boss_key.lock().unwrap() = prefs.privacy_boss_key.clone();
+    *state.ai_popup_enabled.lock().unwrap() = prefs.ai_popup_enabled;
+    *state.ai_popup_hotkey.lock().unwrap() = prefs.ai_popup_hotkey.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -827,6 +938,8 @@ pub fn run() {
             set_perf_interval_ms,
             set_ai_model,
             set_ai_base_url,
+            set_ai_popup_enabled,
+            set_ai_popup_hotkey,
             get_perf_snapshot,
             get_ai_config,
             ai::save_ai_key,
@@ -865,6 +978,8 @@ pub fn run() {
             let app_handle = app.handle().clone();
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
             let _ = sync_boss_key(&app_handle, &state);
+            // AI 小窗热键跟随开关恢复注册（默认开；注册失败仅降级为不可呼出）
+            let _ = sync_ai_popup(&app_handle, &state);
             if *state.taskbar_transparent.lock().unwrap() {
                 sync_taskbar(&app_handle, &state);
             }
@@ -874,13 +989,21 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Destroyed => {
-                cleanup_on_exit(window.app_handle());
+                // 仅主窗口销毁时执行退出清理（AI 小窗等辅助窗口隐藏而非销毁，不触发）
+                if window.label() == "main" {
+                    cleanup_on_exit(window.app_handle());
+                }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 关闭行为由设置「关闭到托盘」决定：
-                // 开 → 隐藏到托盘继续后台运行；关 → 清理后直接退出
                 api.prevent_close();
                 let app = window.app_handle();
+                if window.label() == "ai-popup" {
+                    // AI 小窗：关闭 = 隐藏（对话上下文由前端在隐藏时清空，不落盘）
+                    let _ = window.hide();
+                    return;
+                }
+                // 主窗口关闭行为由设置「关闭到托盘」决定：
+                // 开 → 隐藏到托盘继续后台运行；关 → 清理后直接退出
                 let close_to_tray = *app
                     .state::<std::sync::Arc<AppState>>()
                     .close_to_tray

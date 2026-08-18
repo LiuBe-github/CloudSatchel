@@ -35,6 +35,9 @@ fn default_ai_base_url() -> String {
 fn default_boss_key() -> String {
     "Ctrl+`".to_string()
 }
+fn default_ai_popup_hotkey() -> String {
+    "Ctrl+Shift+Space".to_string()
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -79,6 +82,10 @@ pub struct AppPrefs {
     pub ai_base_url: String, // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
     #[serde(default = "default_boss_key")]
     pub privacy_boss_key: String, // 隐私老板键（FR-13 扩展，默认 Ctrl+`）
+    #[serde(default = "default_true")]
+    pub ai_popup_enabled: bool, // AI 小窗（FR-17）开关，默认开启
+    #[serde(default = "default_ai_popup_hotkey")]
+    pub ai_popup_hotkey: String, // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -112,6 +119,8 @@ impl Default for AppPrefs {
             ai_model: default_ai_model(),
             ai_base_url: default_ai_base_url(),
             privacy_boss_key: default_boss_key(),
+            ai_popup_enabled: true,
+            ai_popup_hotkey: default_ai_popup_hotkey(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

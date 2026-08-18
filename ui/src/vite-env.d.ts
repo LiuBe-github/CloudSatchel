@@ -28,6 +28,9 @@ export interface AppState {
   aiBaseUrl: string; // AI 助手接口地址（OpenAI 兼容）
   privacyBossKey: string; // 隐私老板键（默认 Ctrl+`）
   bossKeyRegistered: boolean; // 老板键热键是否注册成功（被占用时为 false）
+  aiPopupEnabled: boolean; // AI 小窗开关（默认开）
+  aiPopupHotkey: string; // AI 小窗呼出快捷键（默认 Ctrl+Shift+Space）
+  aiPopupRegistered: boolean; // AI 小窗热键是否注册成功
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）

@@ -16,6 +16,11 @@ interface SettingsPanelProps {
   privacyBossKey: string;
   bossKeyRegistered: boolean;
   onBossKeyChange: (key: string) => Promise<void>;
+  aiPopupEnabled: boolean;
+  aiPopupHotkey: string;
+  aiPopupRegistered: boolean;
+  onAiPopupEnabledChange: (enabled: boolean) => Promise<void>;
+  onAiPopupHotkeyChange: (key: string) => Promise<void>;
   background: BackgroundSettings;
   backgroundName: string;
   onBackgroundChange: (next: BackgroundSettings) => void;
@@ -63,6 +68,11 @@ export function SettingsPanel({
   privacyBossKey,
   bossKeyRegistered,
   onBossKeyChange,
+  aiPopupEnabled,
+  aiPopupHotkey,
+  aiPopupRegistered,
+  onAiPopupEnabledChange,
+  onAiPopupHotkeyChange,
   background,
   backgroundName,
   onBackgroundChange,
@@ -101,6 +111,31 @@ export function SettingsPanel({
       setBossKeyInput(privacyBossKey);
     } finally {
       setBossKeySaving(false);
+    }
+  };
+
+  // AI 小窗热键输入框（复用同一套编辑/保存/错误处理模式）
+  const [popupKeyInput, setPopupKeyInput] = useState(aiPopupHotkey);
+  const [popupKeyError, setPopupKeyError] = useState("");
+  const [popupKeySaving, setPopupKeySaving] = useState(false);
+  useEffect(() => setPopupKeyInput(aiPopupHotkey), [aiPopupHotkey]);
+
+  const savePopupHotkey = async () => {
+    const key = popupKeyInput.trim();
+    if (!key || key === aiPopupHotkey) {
+      setPopupKeyInput(aiPopupHotkey);
+      return;
+    }
+    setPopupKeySaving(true);
+    setPopupKeyError("");
+    try {
+      await onAiPopupHotkeyChange(key);
+      setPopupKeyError("");
+    } catch (err) {
+      setPopupKeyError(String(err));
+      setPopupKeyInput(aiPopupHotkey);
+    } finally {
+      setPopupKeySaving(false);
     }
   };
 
@@ -275,6 +310,62 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-section">
+          <div className="settings-label">AI 小窗</div>
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">启用 AI 小窗</div>
+              <div className="setting-row-desc">开启后可用快捷键随时呼出小型 AI 问答窗；关闭后快捷键失效且不影响主界面 AI 助手</div>
+            </div>
+            <Switch
+              checked={aiPopupEnabled}
+              onChange={() => void onAiPopupEnabledChange(!aiPopupEnabled)}
+            />
+          </div>
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">呼出快捷键</div>
+              <div className="setting-row-desc">按下切换呼出 / 隐藏小窗（默认 Ctrl+Shift+Space）</div>
+            </div>
+            <div className="hotkey-editor">
+              <input
+                className="hotkey-input"
+                value={popupKeyInput}
+                onChange={(e) => {
+                  setPopupKeyInput(e.target.value);
+                  setPopupKeyError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void savePopupHotkey();
+                  }
+                }}
+                placeholder="Ctrl+Shift+Space"
+                spellCheck={false}
+                disabled={!aiPopupEnabled}
+              />
+              <button
+                type="button"
+                className="seg-btn primary"
+                onClick={() => void savePopupHotkey()}
+                disabled={popupKeySaving || !aiPopupEnabled}
+              >
+                {popupKeySaving ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+          {popupKeyError && <div className="setting-row-desc error-text">{popupKeyError}</div>}
+          {!popupKeyError && !aiPopupRegistered && aiPopupEnabled && (
+            <div className="setting-row-desc error-text">
+              AI 小窗快捷键注册失败（可能被其他程序占用），已降级为不可呼出
+            </div>
+          )}
+          <div className="setting-row-desc" style={{ marginTop: 8 }}>
+            小窗对话复用主界面 AI 助手的 Key / 模型配置；关闭小窗即清空对话，不落盘
+          </div>
+        </div>
+
+        <div className="settings-section">
           <div className="settings-label">启动与退出</div>
           <div className="setting-row">
             <div className="setting-row-text">
@@ -303,7 +394,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.13.0</span>
+          <span className="settings-version">云笈 · v0.14.0</span>
         </div>
       </div>
     </div>

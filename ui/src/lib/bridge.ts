@@ -28,6 +28,9 @@ const FALLBACK_STATE: AppState = {
   aiBaseUrl: "https://api.openai.com/v1",
   privacyBossKey: "Ctrl+`",
   bossKeyRegistered: false,
+  aiPopupEnabled: true,
+  aiPopupHotkey: "Ctrl+Shift+Space",
+  aiPopupRegistered: false,
   theme: "system",
   animating: false,
   autostart: false,
@@ -85,6 +88,18 @@ export async function setAutohideEnabled(enabled: boolean): Promise<AppState> {
 export async function setPrivacyBossKey(key: string): Promise<AppState> {
   if (!inTauri()) return fallback({ privacyBossKey: key });
   return (await invoke<AppState>("set_privacy_boss_key", { key })) as AppState;
+}
+
+/** 开关 AI 小窗（FR-17） */
+export async function setAiPopupEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ aiPopupEnabled: enabled });
+  return (await invoke<AppState>("set_ai_popup_enabled", { enabled })) as AppState;
+}
+
+/** 设置 AI 小窗呼出快捷键（FR-17）；格式无效或被占用时抛错 */
+export async function setAiPopupHotkey(key: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ aiPopupHotkey: key });
+  return (await invoke<AppState>("set_ai_popup_hotkey", { key })) as AppState;
 }
 
 export async function setPerfIntervalMs(ms: number): Promise<AppState> {
