@@ -60,6 +60,11 @@
   - 功能列表第 6 项「虚拟桌宠」卡片（默认关闭）；capabilities windows 列表需含 pet-window
   - 自动化实测：显示定位 ✓ 精灵渲染 ✓ 拖拽持久化（settings.json petX/petY）✓ 双击菜单 ✓ 隐私触发隐藏/恢复还原 ✓
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.0
+- 2026-08-18 v0.16.1 音频面板修复（用户反馈）
+  - 虚框：透明窗口上 backdrop-filter 产生矩形边缘伪影（模糊采样窗口外内容失败）→ 移除 blur，用高不透明度背景 + 边框高光模拟玻璃感；面板 inset 12px 留阴影空间（窗口 320×108→344×132）；AI 小窗同步（400×520→420×540，shell inset 10px）；pet-menu 去 blur
+  - 应用名：SMTC 的 SourceAppUserModelId 是 AUMID（AppleInc.AppleMusicWin_xxx!App）→ windows::ApplicationModel::AppInfo::GetFromAppUserModelId 查询 DisplayName（"Apple Music"）；副标题改「歌手 · 专辑」优先（MediaState 新增 album 字段）
+  - 实测：Apple Music 显示「刘惜君 & 薛之谦 — 尘」✓ 换歌实时更新 ✓
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.1
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -197,9 +202,9 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.0（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.0）
-- 工作区 git 干净，main 与远端同步（最后 commit `3250a22`）
-- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.0 虚拟桌宠
+- 最新版本：v0.16.1（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.1）
+- 工作区 git 干净，main 与远端同步（最后 commit `04eebcf`）
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
 - `CloudSatchel需求文档.md`（根目录，v1.12）：FR-01~FR-13、FR-15~FR-18 全部已实现；v0.12.0 规划范围（托盘快捷开关 / 老板键 / AI 小窗 / 音频识别 / 桌宠）全部交付
@@ -224,7 +229,8 @@
 - settings.json 读取代容忍 UTF-8 BOM；前端 build 在沙箱需 danger-full-access（Node 子进程 EPERM）
 - Tauri 2 ACL：前端 window 操作（show/hide/setPosition）需 app.security.capabilities 配置 core:window:allow-*；core:window:default 只含只读查询；每个辅助窗口都要列入 windows 列表
 - WASAPI loopback：GetMixFormat 的 WAVEFORMATEXTENSIBLE 必须完整复制（头部+cbSize）再 Initialize，否则 E_INVALIDARG；波形采集以能量驱动（不依赖 SMTC playing，SoundPlayer 等不注册 SMTC 也能出波形）
-- SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation
+- SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation；SourceAppUserModelId 是 AUMID（用 AppInfo::GetFromAppUserModelId 查显示名，feature ApplicationModel）
+- 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
 - CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）与窗口状态
 
 **新会话快速恢复**
