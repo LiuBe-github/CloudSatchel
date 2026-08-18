@@ -1297,6 +1297,32 @@ button {
   color: var(--color-ink);
 }
 
+/* ============ 老板键编辑器（FR-13 扩展） ============ */
+.hotkey-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.hotkey-input {
+  width: 150px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--color-paper-deep);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  text-align: center;
+}
+.hotkey-input:focus {
+  border-color: var(--color-bamboo);
+}
+.error-text {
+  color: var(--color-danger, #c0392b);
+}
+
 /* ============ 性能页开关行（间隔下拉 + 开关） ============ */
 .perf-switch-group {
   display: flex;

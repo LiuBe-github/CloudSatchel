@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { BackgroundFit, BackgroundSettings, ThemeMode } from "../vite-env";
 import { RangeRow } from "./RangeRow";
 import { Switch } from "./Switch";
@@ -13,6 +13,9 @@ interface SettingsPanelProps {
   onCloseToTrayChange: (enabled: boolean) => void;
   privacyIdleSecs: number;
   onPrivacyIdleChange: (secs: number) => void;
+  privacyBossKey: string;
+  bossKeyRegistered: boolean;
+  onBossKeyChange: (key: string) => Promise<void>;
   background: BackgroundSettings;
   backgroundName: string;
   onBackgroundChange: (next: BackgroundSettings) => void;
@@ -57,6 +60,9 @@ export function SettingsPanel({
   onCloseToTrayChange,
   privacyIdleSecs,
   onPrivacyIdleChange,
+  privacyBossKey,
+  bossKeyRegistered,
+  onBossKeyChange,
   background,
   backgroundName,
   onBackgroundChange,
@@ -72,6 +78,31 @@ export function SettingsPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // 老板键输入框：跟随持久化值；保存失败时回退显示当前生效值
+  const [bossKeyInput, setBossKeyInput] = useState(privacyBossKey);
+  const [bossKeyError, setBossKeyError] = useState("");
+  const [bossKeySaving, setBossKeySaving] = useState(false);
+  useEffect(() => setBossKeyInput(privacyBossKey), [privacyBossKey]);
+
+  const saveBossKey = async () => {
+    const key = bossKeyInput.trim();
+    if (!key || key === privacyBossKey) {
+      setBossKeyInput(privacyBossKey);
+      return;
+    }
+    setBossKeySaving(true);
+    setBossKeyError("");
+    try {
+      await onBossKeyChange(key);
+      setBossKeyError("");
+    } catch (err) {
+      setBossKeyError(String(err));
+      setBossKeyInput(privacyBossKey);
+    } finally {
+      setBossKeySaving(false);
+    }
+  };
 
   return (
     <div className={`side-panel${open ? " open" : ""}`}>
@@ -198,6 +229,46 @@ export function SettingsPanel({
               ))}
             </select>
           </div>
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">隐私老板键</div>
+              <div className="setting-row-desc">
+                按下立即触发隐私保护（无需等待空闲），再按恢复；老板键触发后鼠标/键盘操作不会恢复（默认 Ctrl+`）
+              </div>
+            </div>
+            <div className="hotkey-editor">
+              <input
+                className="hotkey-input"
+                value={bossKeyInput}
+                onChange={(e) => {
+                  setBossKeyInput(e.target.value);
+                  setBossKeyError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveBossKey();
+                  }
+                }}
+                placeholder="Ctrl+Shift+Space"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="seg-btn primary"
+                onClick={() => void saveBossKey()}
+                disabled={bossKeySaving}
+              >
+                {bossKeySaving ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+          {bossKeyError && <div className="setting-row-desc error-text">{bossKeyError}</div>}
+          {!bossKeyError && !bossKeyRegistered && (
+            <div className="setting-row-desc error-text">
+              老板键注册失败（可能被其他程序占用），已降级为仅空闲触发
+            </div>
+          )}
           <div className="setting-row-desc" style={{ marginTop: 8 }}>
             空闲超时自动最小化所有窗口、隐藏桌面图标与任务栏并静音；操作鼠标或键盘立即还原
           </div>
@@ -232,7 +303,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.12.1</span>
+          <span className="settings-version">云笈 · v0.13.0</span>
         </div>
       </div>
     </div>

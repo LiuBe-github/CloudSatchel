@@ -15,6 +15,7 @@ mod background;
 mod dlog;
 mod fullscreen;
 mod hooks;
+mod hotkey;
 mod icons;
 mod perf;
 mod prefs;
@@ -53,6 +54,8 @@ pub(crate) struct AppState {
     perf_interval_ms: Mutex<u32>,    // 性能监控采样间隔（毫秒）
     ai_model: Mutex<String>,         // AI 助手模型名
     ai_base_url: Mutex<String>,      // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
+    privacy_boss_key: Mutex<String>, // 隐私老板键（FR-13 扩展，默认 Ctrl+`）
+    boss_key_registered: Mutex<bool>, // 老板键热键当前是否注册成功（运行时状态，不入盘）
 }
 
 impl Default for AppState {
@@ -77,6 +80,8 @@ impl Default for AppState {
             perf_interval_ms: Mutex::new(1000),
             ai_model: Mutex::new("gpt-4o-mini".to_string()),
             ai_base_url: Mutex::new(ai::DEFAULT_BASE_URL.to_string()),
+            privacy_boss_key: Mutex::new("Ctrl+`".to_string()),
+            boss_key_registered: Mutex::new(false),
         }
     }
 }
@@ -99,6 +104,8 @@ struct Snapshot {
     perf_interval_ms: u32,
     ai_model: String,
     ai_base_url: String,
+    privacy_boss_key: String,
+    boss_key_registered: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -126,6 +133,8 @@ fn snapshot(state: &AppState) -> Snapshot {
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
+        privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
+        boss_key_registered: *state.boss_key_registered.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -154,6 +163,7 @@ fn persist(state: &AppState) {
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
+        privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -225,6 +235,7 @@ fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
     perf::stop();
     privacy::stop();
+    hotkey::unregister_all();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
     if *state.taskbar_transparent.lock().unwrap() || *state.taskbar_applied.lock().unwrap() {
@@ -414,6 +425,37 @@ fn sync_idle(state: &AppState) {
     );
 }
 
+/// 老板键全局热键 id（WM_HOTKEY 的 wParam）
+const BOSS_KEY_HOTKEY_ID: i32 = 0x1301;
+
+/// 同步老板键热键注册：跟随「隐私操作」开关（FR-13 扩展）。
+/// 注册失败（被占用 / 系统保留）返回 Err 并置 boss_key_registered=false，
+/// 降级为仅空闲触发，不影响应用运行。
+fn sync_boss_key(app: &AppHandle, state: &std::sync::Arc<AppState>) -> Result<(), String> {
+    let enabled = *state.privacy_enabled.lock().unwrap();
+    if !enabled {
+        hotkey::unregister(BOSS_KEY_HOTKEY_ID);
+        *state.boss_key_registered.lock().unwrap() = false;
+        return Ok(());
+    }
+    let spec_str = state.privacy_boss_key.lock().unwrap().clone();
+    let spec = hotkey::parse_hotkey(&spec_str).ok_or_else(|| {
+        format!("快捷键格式无效：{spec_str}（示例：Ctrl+`、Ctrl+Shift+Space）")
+    })?;
+    let app2 = app.clone();
+    let ok = hotkey::register(BOSS_KEY_HOTKEY_ID, spec, move || {
+        privacy::boss_key_pressed();
+        let st = app2.state::<std::sync::Arc<AppState>>();
+        let _ = app2.emit("state-updated", snapshot(&st));
+    });
+    *state.boss_key_registered.lock().unwrap() = ok;
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("快捷键注册失败：{spec_str}（可能被其他程序占用）"))
+    }
+}
+
 #[tauri::command]
 fn set_privacy_enabled(
     app: AppHandle,
@@ -429,10 +471,42 @@ fn set_privacy_enabled(
         *e = enabled;
     }
     sync_idle(&state);
+    // 老板键热键跟随开关注册/注销（注册失败仅降级为空闲触发，不影响开关本身）
+    let _ = sync_boss_key(&app, &state);
     persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
+}
+
+/// 设置隐私老板键快捷键（FR-13 扩展）：
+/// 解析成功 → 持久化 → 若隐私开关开启则立即重新注册；注册失败回滚旧键并返回错误。
+#[tauri::command]
+fn set_privacy_boss_key(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    key: String,
+) -> Result<Snapshot, String> {
+    let key = key.trim().to_string();
+    hotkey::parse_hotkey(&key)
+        .ok_or_else(|| format!("快捷键格式无效：{key}（示例：Ctrl+`、Ctrl+Shift+Space）"))?;
+    let old = state.privacy_boss_key.lock().unwrap().clone();
+    *state.privacy_boss_key.lock().unwrap() = key.clone();
+    persist(&state);
+    match sync_boss_key(&app, &state) {
+        Ok(()) => {
+            let snap = snapshot(&state);
+            let _ = app.emit("state-updated", snap.clone());
+            Ok(snap)
+        }
+        Err(e) => {
+            // 回滚旧键并尽力恢复旧热键
+            *state.privacy_boss_key.lock().unwrap() = old;
+            persist(&state);
+            let _ = sync_boss_key(&app, &state);
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -725,6 +799,7 @@ pub fn run() {
     *state.perf_interval_ms.lock().unwrap() = prefs.perf_interval_ms;
     *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
     *state.ai_base_url.lock().unwrap() = prefs.ai_base_url.clone();
+    *state.privacy_boss_key.lock().unwrap() = prefs.privacy_boss_key.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -747,6 +822,7 @@ pub fn run() {
             set_performance_monitor,
             set_privacy_enabled,
             set_privacy_idle_secs,
+            set_privacy_boss_key,
             set_autohide_enabled,
             set_perf_interval_ms,
             set_ai_model,
@@ -787,6 +863,8 @@ pub fn run() {
             sync_idle(&state);
             privacy::start();
             let app_handle = app.handle().clone();
+            // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
+            let _ = sync_boss_key(&app_handle, &state);
             if *state.taskbar_transparent.lock().unwrap() {
                 sync_taskbar(&app_handle, &state);
             }

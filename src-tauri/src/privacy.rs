@@ -12,6 +12,10 @@
 //!   隐藏后的边缘弹出 / 移开再隐藏由系统原生行为完成；全屏或云笈最大化期间暂停。
 //!   仅改变运行时 AppBar 状态，不写注册表、不改系统「自动隐藏任务栏」设置开关。
 //!
+//! - 老板键（FR-13 扩展，v0.13.0）：全局热键（默认 Ctrl+`）立即触发隐私序列、再按恢复。
+//!   老板键触发后仅响应老板键恢复，鼠标/键盘操作不恢复（避免老板在场时误恢复）；
+//!   关闭「隐私操作」开关或退出应用仍会完整恢复。
+//!
 //! 纯净性：不写注册表、不联网；退出（stop）时完整恢复所有状态。
 
 #![allow(non_snake_case)]
@@ -85,6 +89,8 @@ static THREAD: OnceLock<()> = OnceLock::new();
 static RUNNING: AtomicBool = AtomicBool::new(true);
 /// FR-13 是否已触发（触发/恢复通过 ACTIVE_LOCK 串行化，成对执行）
 static PRIVACY_TRIGGERED: AtomicBool = AtomicBool::new(false);
+/// 当前触发是否由老板键发起（true 时鼠标/键盘操作不触发恢复，仅老板键可恢复）
+static BOSS_TRIGGERED: AtomicBool = AtomicBool::new(false);
 /// 触发序列与恢复序列互斥，避免交错
 static ACTIVE_LOCK: Mutex<()> = Mutex::new(());
 /// 任务栏自动隐藏是否由本应用通过 ABM_SETSTATE 设置（恢复的唯一依据）
@@ -127,6 +133,7 @@ pub fn stop() {
     if PRIVACY_TRIGGERED.load(Ordering::SeqCst) {
         // 同步执行恢复（此时触发线程若在跑，等它写完现场再恢复）
         let _guard = ACTIVE_LOCK.lock().unwrap();
+        BOSS_TRIGGERED.store(false, Ordering::SeqCst);
         if PRIVACY_TRIGGERED.swap(false, Ordering::SeqCst) {
             let snap = PRIVACY_SNAPSHOT.lock().unwrap().take();
             if let Some(s) = snap {
@@ -167,6 +174,20 @@ pub fn configure(privacy_enabled: bool, privacy_idle_secs: u32, autohide_enabled
 /// FR-13 当前是否处于「已触发」状态（供前端状态提示）
 pub fn is_triggered() -> bool {
     PRIVACY_TRIGGERED.load(Ordering::SeqCst)
+}
+
+/// 老板键按下（由 hotkey 模块回调，FR-13 扩展）：
+/// 未触发 → 立即触发隐私序列；已触发 → 立即恢复。开关语义循环切换。
+pub fn boss_key_pressed() {
+    if PRIVACY_TRIGGERED.load(Ordering::SeqCst) {
+        dlog::write("[privacy] boss key -> restore");
+        BOSS_TRIGGERED.store(false, Ordering::SeqCst);
+        restore_privacy_async();
+    } else {
+        dlog::write("[privacy] boss key -> trigger");
+        BOSS_TRIGGERED.store(true, Ordering::SeqCst);
+        trigger_privacy_async();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +267,11 @@ fn poll_loop() {
                     && u64::from(idle_ms) >= u64::from(cfg.privacy_idle_secs) * 1000
                 {
                     trigger_privacy_async();
-                } else if PRIVACY_TRIGGERED.load(Ordering::SeqCst) && input_changed {
+                } else if PRIVACY_TRIGGERED.load(Ordering::SeqCst)
+                    && input_changed
+                    && !BOSS_TRIGGERED.load(Ordering::SeqCst)
+                {
+                    // 老板键触发后仅响应老板键恢复，鼠标/键盘操作不恢复（需求 FR-13 扩展）
                     dlog::write("[privacy] user input detected -> restore");
                     restore_privacy_async();
                 }
@@ -345,6 +370,7 @@ fn restore_privacy_async() {
     }
     std::thread::spawn(|| {
         let _guard = ACTIVE_LOCK.lock().unwrap();
+        BOSS_TRIGGERED.store(false, Ordering::SeqCst);
         if !PRIVACY_TRIGGERED.swap(false, Ordering::SeqCst) {
             return;
         }

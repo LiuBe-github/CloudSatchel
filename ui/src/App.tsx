@@ -8,6 +8,7 @@ import {
   setPerformanceMonitor,
   setPrivacyEnabled,
   setPrivacyIdleSecs,
+  setPrivacyBossKey,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -100,6 +101,8 @@ function App({ initial }: AppProps) {
       privacyEnabled: false,
       privacyIdleSecs: 60,
       privacyActive: false,
+      privacyBossKey: "Ctrl+`",
+      bossKeyRegistered: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
       aiModel: "gpt-4o-mini",
@@ -245,6 +248,12 @@ function App({ initial }: AppProps) {
       console.error("更新隐私操作空闲时间失败", err);
       toastRef.current?.show("操作失败，请稍后重试");
     }
+  }, []);
+
+  const handleBossKeyChange = useCallback(async (key: string) => {
+    const next = await setPrivacyBossKey(key);
+    setState(next);
+    toastRef.current?.show("老板键已更新");
   }, []);
 
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
@@ -413,7 +422,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.12.1</div>
+          <div className="sidebar-version">v0.13.0</div>
           </div>
         </aside>
 
@@ -528,6 +537,9 @@ function App({ initial }: AppProps) {
           onCloseToTrayChange={handleCloseToTray}
           privacyIdleSecs={state.privacyIdleSecs}
           onPrivacyIdleChange={handlePrivacyIdle}
+          privacyBossKey={state.privacyBossKey}
+          bossKeyRegistered={state.bossKeyRegistered}
+          onBossKeyChange={handleBossKeyChange}
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

@@ -32,6 +32,9 @@ fn default_ai_model() -> String {
 fn default_ai_base_url() -> String {
     "https://api.openai.com/v1".to_string()
 }
+fn default_boss_key() -> String {
+    "Ctrl+`".to_string()
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -74,6 +77,8 @@ pub struct AppPrefs {
     pub ai_model: String, // AI 助手模型名（API Key 单独 DPAPI 加密存储）
     #[serde(default = "default_ai_base_url")]
     pub ai_base_url: String, // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
+    #[serde(default = "default_boss_key")]
+    pub privacy_boss_key: String, // 隐私老板键（FR-13 扩展，默认 Ctrl+`）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -106,6 +111,7 @@ impl Default for AppPrefs {
             perf_interval_ms: default_perf_interval(),
             ai_model: default_ai_model(),
             ai_base_url: default_ai_base_url(),
+            privacy_boss_key: default_boss_key(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

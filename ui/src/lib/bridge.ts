@@ -26,6 +26,8 @@ const FALLBACK_STATE: AppState = {
   perfIntervalMs: 1000,
   aiModel: "gpt-4o-mini",
   aiBaseUrl: "https://api.openai.com/v1",
+  privacyBossKey: "Ctrl+`",
+  bossKeyRegistered: false,
   theme: "system",
   animating: false,
   autostart: false,
@@ -77,6 +79,12 @@ export async function setPrivacyIdleSecs(secs: number): Promise<AppState> {
 export async function setAutohideEnabled(enabled: boolean): Promise<AppState> {
   if (!inTauri()) return fallback({ autohideEnabled: enabled });
   return (await invoke<AppState>("set_autohide_enabled", { enabled })) as AppState;
+}
+
+/** 设置隐私老板键快捷键（FR-13 扩展）；格式无效或被占用时抛错 */
+export async function setPrivacyBossKey(key: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyBossKey: key });
+  return (await invoke<AppState>("set_privacy_boss_key", { key })) as AppState;
 }
 
 export async function setPerfIntervalMs(ms: number): Promise<AppState> {

@@ -26,6 +26,8 @@ export interface AppState {
   perfIntervalMs: number; // 性能监控采样间隔（毫秒）
   aiModel: string; // AI 助手模型名
   aiBaseUrl: string; // AI 助手接口地址（OpenAI 兼容）
+  privacyBossKey: string; // 隐私老板键（默认 Ctrl+`）
+  bossKeyRegistered: boolean; // 老板键热键是否注册成功（被占用时为 false）
   theme: ThemeMode;
   animating: boolean;
   autostart: boolean; // 开机自启动（启动文件夹快捷方式）
