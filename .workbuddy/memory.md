@@ -80,6 +80,11 @@
   - 坑：wry/Tauri 在窗口 show 时重置 exstyle（仅音频面板被 show 过所以它失败）→ poll_loop 每 25 tick（2 秒）兜底修复，开销可忽略
   - 实测：三窗口 TOOL=True APP=False，关闭/重开循环后保持
   - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.4
+- 2026-08-18 v0.16.5/0.16.6 失焦出现窗口框架（用户反馈）
+  - v0.16.5：实测 style=0x14CB0000 含 WS_CAPTION|WS_SYSMENU|WS_BORDER（wry decorations:false 只隐藏渲染、保留样式位）→ 清样式位后按钮消失但标题框仍在
+  - v0.16.6 终案：GWL_STYLE 置 WS_POPUP + 清全部框架位 + DwmSetWindowAttribute(DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED)（windows-sys 需加 Win32_Graphics_Dwm feature）→ DWM 聚焦/失焦均不绘制任何非客户区；面板移除 inset 1px 内框线
+  - 实测：style=0x94000000 popup=True caption/sysmenu/border=False；ex tool=True app=False
+  - 已发布：https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6
 
 - 2026-08-15 新增「主机性能监控」功能，版本升级到 v0.8.0
 - 2026-08-15 新增「开关状态记忆」：v0.9.0
@@ -217,8 +222,8 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新版本：v0.16.4（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.4）
-- 工作区 git 干净，main 与远端同步（最后 commit `9361cda`）
+- 最新版本：v0.16.6（最后发布 https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.6）
+- 工作区 git 干净，main 与远端同步（最后 commit `c6ed017`）
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 桌宠/面板修复
 
 **需求文档当前状态**
@@ -248,6 +253,7 @@
 - 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
 - 透明辅助窗口「虚框」终案：SetWindowRgn 圆角裁剪窗口区域 + shadow:false + 无 border/外阴影（见 v0.16.2）
 - Tauri 2 skipTaskbar 在 Windows 不设 WS_EX_TOOLWINDOW（Alt+Tab 仍显示）→ Rust 侧强制 TOOLWINDOW + 轮询兜底（wry show 会重置 exstyle，见 v0.16.4）
+- 无边框辅助窗口完整配方（v0.16.6）：WS_POPUP + 清 WS_CAPTION/SYSMENU/BORDER/MIN/MAX + WS_EX_TOOLWINDOW - APPWINDOW + DWMWA_NCRENDERING_POLICY=DISABLED + SetWindowRgn 圆角 + shadow:false
 - CDP 远程调试（WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port）可验证多窗口 DOM 状态；PowerShell Add-Type P/Invoke 可探测热键占用（err=1409）、窗口状态与 GetWindowRgn；PowerShell 写 JSON 用 [IO.File]::WriteAllText + UTF8Encoding($false) 防 BOM
 
 **新会话快速恢复**
