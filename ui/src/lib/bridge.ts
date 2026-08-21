@@ -35,6 +35,8 @@ const FALLBACK_STATE: AppState = {
   audioPanelEnabled: true,
   audioPanelX: -1,
   audioPanelY: -1,
+  audioPanelOpacity: 75,
+  audioPanelClickThrough: false,
   fullscreenActive: false,
   theme: "system",
   animating: false,
@@ -115,6 +117,18 @@ export async function setAiPopupHotkey(key: string): Promise<AppState> {
 export async function setAudioPanelEnabled(enabled: boolean): Promise<AppState> {
   if (!inTauri()) return fallback({ audioPanelEnabled: enabled });
   return (await invoke<AppState>("set_audio_panel_enabled", { enabled })) as AppState;
+}
+
+/** 设置音频面板背景不透明度（0~100） */
+export async function setAudioPanelOpacity(opacity: number): Promise<AppState> {
+  if (!inTauri()) return fallback({ audioPanelOpacity: opacity });
+  return (await invoke<AppState>("set_audio_panel_opacity", { opacity })) as AppState;
+}
+
+/** 设置音频面板鼠标穿透（开启=仅展示，关闭=可拖动/操作） */
+export async function setAudioPanelClickThrough(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ audioPanelClickThrough: enabled });
+  return (await invoke<AppState>("set_audio_panel_click_through", { enabled })) as AppState;
 }
 
 /** 保存音频面板位置（拖拽结束） */

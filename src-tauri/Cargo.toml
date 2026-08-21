@@ -1,6 +1,6 @@
 [package]
 name = "cloud-satchel"
-version = "0.17.0"
+version = "0.19.0"
 description = "云笈 - 纯净本地 Windows 桌面工具"
 authors = ["LiuBe"]
 edition = "2021"
@@ -50,7 +50,7 @@ windows-sys = { version = "0.59", features = [
 # Win32_Security_Cryptography 用于 AI API Key 的 DPAPI 加密；
 # Media_Control / Media_MediaProperties 用于 FR-18 的 SMTC 媒体会话读取与控制；
 # ApplicationModel 用于把 AUMID 转成人类可读的应用显示名（如 "Apple Music"）
-windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Security_Cryptography", "Media_Control", "Media_MediaProperties", "ApplicationModel", "Foundation"] }
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Security_Cryptography", "Media_Control", "Media_MediaProperties", "ApplicationModel", "Foundation", "Storage_Streams"] }
 
 [profile.release]
 codegen-units = 1

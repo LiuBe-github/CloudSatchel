@@ -4,7 +4,7 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.17.0
+- 当前版本：v0.19.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
 - 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.13）
@@ -30,6 +30,30 @@
 
 ## 最近完成
 
+- 2026-08-21 v0.19.0 音频面板自定义位置与透明度（设置项）
+  - 需求：位置/透明度交给用户——设置面板「音频识别」分组新增**面板背景透明度**滑块（0~100，默认 75）与**鼠标穿透**开关（默认关）
+  - 透明度持久化：prefs `audio_panel_opacity`（u8，serde default）+ snapshot/前端 `audioPanelOpacity`。`set_audio_panel_opacity` 仅持久化+emit；前端 AudioPanel 用 CSS 变量应用：`.audio-panel` 背景渐变 use `var(--audio-bg-top)/var(--audio-bg-bottom)`，JS 注入 `--audio-bg-top: {opacity}%、--audio-bg-bottom: min(100, opacity+4)%`（保留默认 72%/76%）
+  - 鼠标穿透：prefs `audio_panel_click_through`；`set_audio_panel_click_through` 用 **WS_EX_TRANSPARENT**（`set_click_through_window`，需联动 WS_EX_LAYERED，enabled=false 时仅清 TRANSPARENT）+ emit；**穿透开=仅展示（点击其下方窗口），关=可操作**；启动时 on_window_event audio-panel 就绪按持久化值应用穿透
+  - **拖拽已删除（用户决定不要拖拽功能）**：曾两版尝试让面板可拖（`data-tauri-drag-region` 顶条 → 手动 SetCapture 拖拽 `start_audio_drag`），用户在 focusable:false 透明置顶小窗上仍拖不动/不想要 → 全部移除：Rust `start_audio_drag`/`set_audio_panel_position` 调用方、bridge `startAudioDrag`、AudioPanel `handlePanelMouseDown`/onMoved 持久化/`clickThrough` 状态、CSS `.draggable`、windows-sys `Win32_System_SystemServices` feature。**默认位置右/下边距 21→26px（整体左移/上移 5px，`AudioPanel.tsx` MARGIN）**。教训：这种自定义无边框小窗想可拖拽，不要走 data-tauri-drag-region，直接用 SetCapture 手动拖才可靠
+  - AudioPanel 状态新增 `opacity`（`clickThrough` 已删，OS 层管穿透不需要前端跟踪）
+  - 前端：App.tsx 加 `handleAudioOpacityChange/handleAudioClickThroughChange`；vite-env.d.ts AppState + bridge fallback 加两字段；SettingsPanel 新增分组（RangeRow 透明度 + Switch 穿透）
+  - 版本号同步 v0.19.0（Cargo / tauri.conf / ui package / App sidebar / About / Settings footer）；注意「组件命令行 `cargo build` 的 stderr 在 PowerShell 被标成 Error 是正常的，看 exit code」
+- 2026-08-18 v0.18.0 音频面板增强（封面 + 主题色 + 波形幅度）
+  - **封面**：SMTC 读专辑/视频缩略图（audio.rs `read_thumbnail`：`props.Thumbnail()`→`IRandomAccessStreamReference.OpenReadAsync`→`DataReader.LoadAsync/ReadBytes` 读流→按文件头嗅探 mime（png/jpeg/gif/bmp）→base64 data URL，1.5MB 上限）；`THUMB_CACHE` 按 标题|艺术家|专辑|应用 缓存避免每 1 秒重复解码；MediaState 加 `thumbnail`（空串=无封面）。WinRT 接口参数须传**引用**（windows-core `Param<T> for &U`，`DataReader::CreateDataReader(&input)` 而非传值）
+  - **封面展示**：前端 `.audio-panel-art` 58×58 正方形，圆角 12px 与外框一致；前端窗口 320×108→**384×132**（tauri.conf audio-panel）
+  - **主题色**：前端 `extractAccent`（canvas 16×16 采样封面，只统计饱和度>0.16 像素求均色，亮度<0.35 提亮）→ 注入 CSS 变量 `--audio-accent`，应用到处：主播放按钮背景、进度条、波形条渐变（默认回落竹青 `var(--audio-accent, var(--color-bamboo))`）
+  - **波形幅度**：height 由 `round(v*100)` 改为 `min(100, max(10, round(pow(v,0.75)*135)))`——非线性提低能量、底座抬到 10%，震动更明显
+  - MediaState 类型权威定义在 `ui/src/vite-env.d.ts`（AudioPanel 不重复定义本地 interface），`bridge.onMediaState` 依赖它；TS 变更集中一处
+  - windows crate 加 `Storage_Streams` feature；版本 0.17.0→0.18.0
+  - **定位修复（用户反馈：窗口加宽后太靠右/盖住任务栏）**：窗口 320→384 后，残留持久化的旧贴边左上角坐标（基于旧宽）导致右/下缘溢出。修复：AudioPanel 初始化统一定位并 **clamp 进主显示器工作区**（`min(max(x, work.left), work.right-width)`，y 同理）——窗口变宽/变高后坐标不再合适也强制回拉到工作区内，不超屏右/下边界、不盖任务栏
+  - **定位微调（用户偏好：留安全距离）**：默认右下角边距 16→**21px**（MARGIN=21，面板默认距右/下缘 21px），且 clamp 兜底 **SAFE=5**（持久化坐标即使贴最右/最下缘也至少留 5px）——面板不再贴着屏幕边缘和任务栏
+  - **透明度（用户偏好：更透）**：`.audio-panel` 背景纸感 alpha 82%/86% → **72%/76%**，更透出桌面
+  - 待用户实测（封面需播放器通过 SMTC 提供缩略图，Apple Music/mpv 等有，桌面浏览器标签常无）
+- 2026-08-18 v0.17.0.1 修复「启动/开开关残留音频透明虚框」
+  - 现象：上次退出时音频开关开着 → 下次启动若无播放，右下角残留透明虚框
+  - 根因：音频面板显示与否的权威被破坏——前端初始化 getState 后**无条件 `win.show()`**；后端 `set_audio_panel_enabled(true)` 也强制 `win.show()`。两者都在「无媒体会话（media=null→visible=false）」时把窗口显示出来，而 visible-effect 依赖 `[visible]`（false 不变不重跑），窗口滞留显示空内容 = 透明虚框
+  - 修复：显示由前端 `visible` 单一决定——① 前端 init 只定位不 show；② visible 计算加入 `enabled !== false`（enabled 从 state-updated/getState 读取）；③ 后端开开关不再 show/uminimize（有媒体时前端 visible 变 true 自行 show，同时覆盖 v0.16.3「重开不显示」）；关闭仍 hide
+  - 经验：**辅助窗口的 show/hide 只能由一个权威源（前端 visible）驱动**；后端/init 的旁路 show 会与 React 可见性状态产生错配（show 了但应隐藏）
 - 2026-08-18 v0.17.0 移除虚拟桌宠 + 音频识别移入功能列表
   - **删除桌宠全部功能**（用户明确不需要）：pet-window 窗口、PetWindow.tsx、set_pet_enabled/set_pet_position、prefs pet_* 字段、poll_loop 隐私联动、privacy.rs collect_cb 桌宠跳过、CSS .pet-* 样式、FEATURES 桌宠项
   - **音频识别从设置面板移入主界面功能列表**（第 6 项卡片，handleToggle 走 set_audio_panel_enabled）：SettingsPanel 删除「音频识别」分组与 props

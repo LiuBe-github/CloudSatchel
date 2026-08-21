@@ -16,9 +16,10 @@
 
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use base64::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -26,8 +27,10 @@ use windows::ApplicationModel::AppInfo;
 use windows::core::HSTRING;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager,
+    GlobalSystemMediaTransportControlsSessionMediaProperties,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
+use windows::Storage::Streams::{DataReader, IInputStream, IRandomAccessStreamReference};
 use windows::Win32::Media::Audio::{
     eMultimedia, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX,
@@ -51,6 +54,10 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static THREAD: OnceLock<()> = OnceLock::new();
 
+/// 封面缓存：键 = 曲目标识（标题|艺术家|专辑|应用），值 = data URL。
+/// SMTC 缩略图几乎不随同一首歌变化，缓存避免每 1 秒重新解码 / base64 大图。
+static THUMB_CACHE: Mutex<Option<(String, String)>> = Mutex::new(None);
+
 /// 媒体会话状态（emit `media-state`）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +66,8 @@ pub struct MediaState {
     pub active: bool,
     /// 是否正在播放（暂停时为 false）
     pub playing: bool,
+    /// 专辑 / 视频封面 data URL（`data:<mime>;base64,`，无封面时为空串；前端隐藏占位）
+    pub thumbnail: String,
     /// 播放应用名（人类可读，如 "Apple Music"；未知时为空串）
     pub app_name: String,
     /// 媒体标题
@@ -88,6 +97,7 @@ impl MediaState {
         Self {
             active: false,
             playing: false,
+            thumbnail: String::new(),
             app_name: String::new(),
             title: String::new(),
             artist: String::new(),
@@ -205,9 +215,14 @@ fn read_current_session() -> MediaState {
             &session.SourceAppUserModelId().unwrap_or_default().to_string(),
         );
 
+        // 封面缩略图（带缓存：同一首歌不反复读取）
+        let thumb_key = format!("{title}|{artist}|{album}|{app_name}");
+        let thumbnail = cached_thumbnail(&thumb_key, || read_thumbnail(&props));
+
         Ok(MediaState {
             active: true,
             playing,
+            thumbnail,
             app_name,
             title,
             artist,
@@ -231,6 +246,62 @@ fn read_current_session() -> MediaState {
             idle
         }
     }
+}
+
+/// 按缓存键返回缩略图；未命中时调用 `load` 生成并写入缓存。
+/// SMTC 缩略图解码 / base64 较耗，同一首歌只读取一次。
+fn cached_thumbnail(key: &str, load: impl FnOnce() -> String) -> String {
+    if let Ok(guard) = THUMB_CACHE.lock() {
+        if let Some((k, v)) = guard.as_ref() {
+            if k == key {
+                return v.clone();
+            }
+        }
+    }
+    let value = load();
+    if let Ok(mut guard) = THUMB_CACHE.lock() {
+        *guard = Some((key.to_string(), value.clone()));
+    }
+    value
+}
+
+/// 读取 SMTC 缩略图流 → data URL（`data:<mime>;base64,`）。
+/// 失败 / 无封面 / 无法识别的图片格式 → 返回空串（前端隐藏封面占位）。
+fn read_thumbnail(props: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> String {
+    const MAX_BYTES: u32 = 1_500_000; // 缩略图上限约 1.5MB，防异常大图拖垮轮询
+    let result = (|| -> windows::core::Result<String> {
+        let thumb: IRandomAccessStreamReference = props.Thumbnail()?;
+        let stream = thumb.OpenReadAsync()?.get()?;
+        let size = stream.Size()?.min(MAX_BYTES as u64) as u32;
+        if size < 4 {
+            return Ok(String::new()); // 空缩略图
+        }
+        let input: IInputStream = stream.GetInputStreamAt(0)?;
+        // GetCurrentInputStream 更省事；这里显式 GetInputStreamAt(0) 保证从头读
+        let reader = DataReader::CreateDataReader(&input)?;
+        let loaded = reader.LoadAsync(size)?.get()?;
+        if loaded == 0 {
+            return Ok(String::new());
+        }
+        let mut bytes = vec![0u8; loaded as usize];
+        reader.ReadBytes(&mut bytes)?;
+
+        // 用文件头嗅探真实图片格式（SMTC ContentType 常不准/为空）
+        let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            "image/png"
+        } else if bytes.starts_with(b"\xff\xd8\xff") {
+            "image/jpeg"
+        } else if bytes.starts_with(b"GIF8") {
+            "image/gif"
+        } else if bytes.starts_with(b"BM") {
+            "image/bmp"
+        } else {
+            return Ok(String::new());
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:{mime};base64,{b64}"))
+    })();
+    result.unwrap_or_default()
 }
 
 /// 系统是否支持 SMTC（尝试创建 manager，成功即支持）

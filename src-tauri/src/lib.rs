@@ -63,6 +63,8 @@ pub(crate) struct AppState {
     audio_panel_enabled: Mutex<bool>, // 音频识别面板（FR-18）开关（默认开）
     audio_panel_x: Mutex<i32>,        // 面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
     audio_panel_y: Mutex<i32>,        // 面板位置 Y
+    audio_panel_opacity: Mutex<u8>,   // 面板背景不透明度（0~100）
+    audio_panel_click_through: Mutex<bool>, // 面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
 }
 
 impl Default for AppState {
@@ -95,6 +97,8 @@ impl Default for AppState {
             audio_panel_enabled: Mutex::new(true),
             audio_panel_x: Mutex::new(-1),
             audio_panel_y: Mutex::new(-1),
+            audio_panel_opacity: Mutex::new(75),
+            audio_panel_click_through: Mutex::new(false),
         }
     }
 }
@@ -126,6 +130,8 @@ struct Snapshot {
     audio_panel_enabled: bool,
     audio_panel_x: i32,
     audio_panel_y: i32,
+    audio_panel_opacity: u8,
+    audio_panel_click_through: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -162,6 +168,8 @@ fn snapshot(state: &AppState) -> Snapshot {
         audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
         audio_panel_x: *state.audio_panel_x.lock().unwrap(),
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
+        audio_panel_opacity: *state.audio_panel_opacity.lock().unwrap(),
+        audio_panel_click_through: *state.audio_panel_click_through.lock().unwrap(),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -196,6 +204,8 @@ fn persist(state: &AppState) {
         audio_panel_enabled: *state.audio_panel_enabled.lock().unwrap(),
         audio_panel_x: *state.audio_panel_x.lock().unwrap(),
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
+        audio_panel_opacity: *state.audio_panel_opacity.lock().unwrap(),
+        audio_panel_click_through: *state.audio_panel_click_through.lock().unwrap(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -959,12 +969,11 @@ fn set_audio_panel_enabled(
         *e = enabled;
     }
     audio::set_enabled(enabled);
+    // 窗口显示由前端 visible 决定（enabled && 有媒体会话才显示）：开启开关时
+    // 不强制 show，避免无播放时在右下角残留透明虚框；有媒体时前端 visible 变
+    // true 会自行 show。关闭时直接隐藏。
     if let Some(win) = app.get_webview_window("audio-panel") {
-        if enabled {
-            // 重新打开：恢复窗口显示（无播放时前端自动淡出，播放时出现）
-            let _ = win.show();
-            let _ = win.unminimize();
-        } else {
+        if !enabled {
             let _ = win.hide();
         }
     }
@@ -972,6 +981,80 @@ fn set_audio_panel_enabled(
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
+}
+
+/// 设置音频面板背景不透明度（0~100），仅持久化；前端用 CSS 变量应用。
+#[tauri::command]
+fn set_audio_panel_opacity(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    opacity: u8,
+) -> Snapshot {
+    let opaque = opacity.min(100);
+    *state.audio_panel_opacity.lock().unwrap() = opaque;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置音频面板鼠标穿透：开启后点击穿透窗口（仅展示，无法拖动/操作）；
+/// 关闭后可拖动/操作。通过窗口扩展样式 WS_EX_TRANSPARENT 实现（需配合
+/// WS_EX_LAYERED，透明面板窗口通常已具备）。
+#[tauri::command]
+fn set_audio_panel_click_through(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.audio_panel_click_through.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    if let Some(win) = app.get_webview_window("audio-panel") {
+        set_click_through_window(&win, enabled);
+    }
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 应用 / 撤销窗口级鼠标穿透（WS_EX_TRANSPARENT，需保持 WS_EX_LAYERED）
+fn set_click_through_window(window: &tauri::WebviewWindow, enabled: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd: *mut core::ffi::c_void = hwnd.0;
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let new_ex = if enabled {
+            ex | WS_EX_TRANSPARENT | WS_EX_LAYERED
+        } else {
+            ex & !WS_EX_TRANSPARENT
+        };
+        if new_ex != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex as isize);
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
 }
 
 /// 保存音频面板位置（拖拽结束时调用，持久化）
@@ -1224,6 +1307,8 @@ pub fn run() {
     *state.audio_panel_enabled.lock().unwrap() = prefs.audio_panel_enabled;
     *state.audio_panel_x.lock().unwrap() = prefs.audio_panel_x;
     *state.audio_panel_y.lock().unwrap() = prefs.audio_panel_y;
+    *state.audio_panel_opacity.lock().unwrap() = prefs.audio_panel_opacity;
+    *state.audio_panel_click_through.lock().unwrap() = prefs.audio_panel_click_through;
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -1255,6 +1340,8 @@ pub fn run() {
             set_ai_popup_hotkey,
             set_audio_panel_enabled,
             set_audio_panel_position,
+            set_audio_panel_opacity,
+            set_audio_panel_click_through,
             audio_media_control,
             get_perf_snapshot,
             get_ai_config,
@@ -1297,6 +1384,10 @@ pub fn run() {
                 if let Some(win) = app.get_webview_window(label) {
                     make_tool_window(&win);
                     install_nccalc_fix(&win);
+                    // 恢复上次的鼠标穿透（panel 专属）
+                    if label == "audio-panel" && *state.audio_panel_click_through.lock().unwrap() {
+                        set_click_through_window(&win, true);
+                    }
                 }
             }
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）

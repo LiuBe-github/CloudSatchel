@@ -41,6 +41,9 @@ fn default_ai_popup_hotkey() -> String {
 fn default_neg_one() -> i32 {
     -1
 }
+fn default_audio_opacity() -> u8 {
+    75 // 音频面板背景不透明度（0 最透 ~ 100 不透明）
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -95,6 +98,10 @@ pub struct AppPrefs {
     pub audio_panel_x: i32, // 音频面板位置 X（物理像素，-1 = 未设置 → 右下角默认）
     #[serde(default = "default_neg_one")]
     pub audio_panel_y: i32, // 音频面板位置 Y
+    #[serde(default = "default_audio_opacity")]
+    pub audio_panel_opacity: u8, // 音频面板背景不透明度（0~100）
+    #[serde(default)]
+    pub audio_panel_click_through: bool, // 音频面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -133,6 +140,8 @@ impl Default for AppPrefs {
             audio_panel_enabled: true,
             audio_panel_x: default_neg_one(),
             audio_panel_y: default_neg_one(),
+            audio_panel_opacity: default_audio_opacity(),
+            audio_panel_click_through: false,
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

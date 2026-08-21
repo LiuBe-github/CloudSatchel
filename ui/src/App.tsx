@@ -12,6 +12,8 @@ import {
   setAiPopupEnabled,
   setAiPopupHotkey,
   setAudioPanelEnabled,
+  setAudioPanelOpacity,
+  setAudioPanelClickThrough,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -81,7 +83,7 @@ const FEATURES = [
     title: "音频识别",
     subtitle: "桌面右下角媒体面板：音源、进度与波形",
     detail:
-      "开启后桌面右下角显示当前播放的音源、标题与进度，支持上一首 / 暂停播放 / 下一首控制与波形可视化；无播放自动隐藏，全屏时隐藏，可拖拽移动位置（重启后保持）。音源信息通过系统媒体会话（SMTC）本地读取，不联网。",
+      "开启后桌面右下角显示当前播放的音源、标题与进度，支持上一首 / 暂停播放 / 下一首控制与波形可视化；无播放自动隐藏，全屏时隐藏。音源信息通过系统媒体会话（SMTC）本地读取，不联网。",
   },
 ];
 
@@ -120,6 +122,8 @@ function App({ initial }: AppProps) {
       audioPanelEnabled: true,
       audioPanelX: -1,
       audioPanelY: -1,
+      audioPanelOpacity: 75,
+      audioPanelClickThrough: false,
       fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
@@ -296,6 +300,31 @@ function App({ initial }: AppProps) {
     toastRef.current?.show("AI 小窗快捷键已更新");
   }, []);
 
+  const handleAudioOpacityChange = useCallback(async (opacity: number) => {
+    try {
+      const next = await setAudioPanelOpacity(opacity);
+      setState(next);
+    } catch (err) {
+      console.error("更新音频面板透明度失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleAudioClickThroughChange = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setAudioPanelClickThrough(enabled);
+      setState(next);
+      toastRef.current?.show(
+        enabled
+          ? "音频面板已设为鼠标穿透（仅展示，可点击其下方的窗口）"
+          : "音频面板已取消鼠标穿透（可拖动/操作）",
+      );
+    } catch (err) {
+      console.error("切换音频面板鼠标穿透失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
     try {
       const next = await setAutohideEnabled(enabled);
@@ -469,7 +498,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.17.0</div>
+          <div className="sidebar-version">v0.19.0</div>
           </div>
         </aside>
 
@@ -594,6 +623,10 @@ function App({ initial }: AppProps) {
           aiPopupRegistered={state.aiPopupRegistered}
           onAiPopupEnabledChange={handleAiPopupEnabledChange}
           onAiPopupHotkeyChange={handleAiPopupHotkeyChange}
+          audioPanelOpacity={state.audioPanelOpacity}
+          audioPanelClickThrough={state.audioPanelClickThrough}
+          onAudioOpacityChange={handleAudioOpacityChange}
+          onAudioClickThroughChange={handleAudioClickThroughChange}
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

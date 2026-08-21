@@ -21,6 +21,10 @@ interface SettingsPanelProps {
   aiPopupRegistered: boolean;
   onAiPopupEnabledChange: (enabled: boolean) => Promise<void>;
   onAiPopupHotkeyChange: (key: string) => Promise<void>;
+  audioPanelOpacity: number;
+  audioPanelClickThrough: boolean;
+  onAudioOpacityChange: (opacity: number) => void;
+  onAudioClickThroughChange: (enabled: boolean) => void;
   background: BackgroundSettings;
   backgroundName: string;
   onBackgroundChange: (next: BackgroundSettings) => void;
@@ -73,6 +77,10 @@ export function SettingsPanel({
   aiPopupRegistered,
   onAiPopupEnabledChange,
   onAiPopupHotkeyChange,
+  audioPanelOpacity,
+  audioPanelClickThrough,
+  onAudioOpacityChange,
+  onAudioClickThroughChange,
   background,
   backgroundName,
   onBackgroundChange,
@@ -366,6 +374,28 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-section">
+          <div className="settings-label">音频识别</div>
+          <RangeRow
+            label="面板背景透明度"
+            value={audioPanelOpacity}
+            min={0}
+            max={100}
+            step={5}
+            format={(v) => `${v}%`}
+            onChange={onAudioOpacityChange}
+          />
+          <div className="setting-row">
+            <div className="setting-row-text">
+              <div className="setting-row-title">鼠标穿透</div>
+              <div className="setting-row-desc">
+                开启后音频面板不响应鼠标（仅展示，可点击其下方的窗口）；关闭后可操作（点击控制播放）
+              </div>
+            </div>
+            <Switch checked={audioPanelClickThrough} onChange={() => onAudioClickThroughChange(!audioPanelClickThrough)} />
+          </div>
+        </div>
+
+        <div className="settings-section">
           <div className="settings-label">启动与退出</div>
           <div className="setting-row">
             <div className="setting-row-text">
@@ -394,7 +424,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.17.0</span>
+          <span className="settings-version">云笈 · v0.19.0</span>
         </div>
       </div>
     </div>

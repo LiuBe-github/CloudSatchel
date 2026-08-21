@@ -1421,10 +1421,13 @@ button {
   inset: 0;
   display: flex;
   flex-direction: column;
+  /* 背景不透明度由设置项控制（--audio-bg-top/bottom，默认保留原 72%/76%） */
+  --audio-bg-top: 72%;
+  --audio-bg-bottom: 76%;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--color-paper-warm) 82%, transparent),
-    color-mix(in srgb, var(--color-paper) 86%, transparent)
+    color-mix(in srgb, var(--color-paper-warm) var(--audio-bg-top), transparent),
+    color-mix(in srgb, var(--color-paper) var(--audio-bg-bottom), transparent)
   );
   border-radius: 12px;
   overflow: hidden;
@@ -1458,20 +1461,28 @@ button {
   transform: translateY(0);
   pointer-events: auto;
 }
-/* 拖拽热区（标题条上方空白区），不遮挡按钮 */
-.audio-panel-drag {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 26px;
-  z-index: 2;
-}
 .audio-panel-body {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px 4px;
+}
+/* 专辑/视频封面：正方形，圆角与面板外框一致（12px） */
+.audio-panel-art {
+  flex-shrink: 0;
+  width: 58px;
+  height: 58px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+.audio-panel-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 .audio-panel-info {
   flex: 1;
@@ -1532,6 +1543,17 @@ button {
 .audio-btn-main:hover {
   background: var(--color-bamboo-light);
 }
+/* 有封面主题色时（--audio-accent 被内联注入），播放按钮改用主题色 */
+.audio-btn-main {
+  background: var(--audio-accent, var(--color-bamboo));
+}
+.audio-btn-main:hover {
+  background: color-mix(
+    in srgb,
+    var(--audio-accent, var(--color-bamboo)) 78%,
+    #fff
+  );
+}
 .audio-panel-progress {
   height: 3px;
   margin: 0 12px 4px;
@@ -1542,7 +1564,7 @@ button {
 .audio-panel-progress-bar {
   height: 100%;
   border-radius: 2px;
-  background: var(--color-bamboo);
+  background: var(--audio-accent, var(--color-bamboo));
   transition: width 0.6s linear;
 }
 .audio-panel-wave {
@@ -1557,7 +1579,11 @@ button {
   flex: 1;
   min-width: 2px;
   border-radius: 1.5px;
-  background: linear-gradient(180deg, var(--color-bamboo-light), var(--color-bamboo));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--audio-accent, var(--color-bamboo)) 78%, #fff),
+    var(--audio-accent, var(--color-bamboo))
+  );
   transition: height 0.12s ease;
 }
 

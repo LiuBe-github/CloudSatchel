@@ -34,6 +34,8 @@ export interface AppState {
   audioPanelEnabled: boolean; // 音频识别面板开关（默认开）
   audioPanelX: number; // 音频面板位置 X（物理像素，-1 = 未设置）
   audioPanelY: number; // 音频面板位置 Y
+  audioPanelOpacity: number; // 音频面板背景不透明度（0~100，越高越不透明）
+  audioPanelClickThrough: boolean; // 音频面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
   fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
   animating: boolean;
@@ -63,6 +65,7 @@ export interface AiConfig {
 export interface MediaState {
   active: boolean;
   playing: boolean;
+  thumbnail: string;
   appName: string;
   title: string;
   artist: string;
