@@ -23,7 +23,9 @@ mod prefs;
 mod privacy;
 mod taskbar;
 mod taskbar_engine;
+mod translate;
 mod tray;
+mod volume;
 
 use std::sync::Mutex;
 
@@ -65,6 +67,9 @@ pub(crate) struct AppState {
     audio_panel_y: Mutex<i32>,        // 面板位置 Y
     audio_panel_opacity: Mutex<u8>,   // 面板背景不透明度（0~100）
     audio_panel_click_through: Mutex<bool>, // 面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
+    translate_enabled: Mutex<bool>,      // 鼠标选取翻译（v0.20.0）开关（默认开）
+    translate_engine: Mutex<String>,     // 翻译引擎："ai" | "microsoft"
+    translate_ms_region: Mutex<String>,  // 微软翻译区域（Region）
 }
 
 impl Default for AppState {
@@ -99,6 +104,9 @@ impl Default for AppState {
             audio_panel_y: Mutex::new(-1),
             audio_panel_opacity: Mutex::new(75),
             audio_panel_click_through: Mutex::new(false),
+            translate_enabled: Mutex::new(true),
+            translate_engine: Mutex::new("ai".to_string()),
+            translate_ms_region: Mutex::new(String::new()),
         }
     }
 }
@@ -132,6 +140,10 @@ struct Snapshot {
     audio_panel_y: i32,
     audio_panel_opacity: u8,
     audio_panel_click_through: bool,
+    translate_enabled: bool,
+    translate_engine: String,
+    translate_ms_region: String,
+    translate_has_ms_key: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -170,6 +182,10 @@ fn snapshot(state: &AppState) -> Snapshot {
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
         audio_panel_opacity: *state.audio_panel_opacity.lock().unwrap(),
         audio_panel_click_through: *state.audio_panel_click_through.lock().unwrap(),
+        translate_enabled: *state.translate_enabled.lock().unwrap(),
+        translate_engine: state.translate_engine.lock().unwrap().clone(),
+        translate_ms_region: state.translate_ms_region.lock().unwrap().clone(),
+        translate_has_ms_key: ai::has_encrypted_key(translate::MS_KEY_FILE),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -206,6 +222,9 @@ fn persist(state: &AppState) {
         audio_panel_y: *state.audio_panel_y.lock().unwrap(),
         audio_panel_opacity: *state.audio_panel_opacity.lock().unwrap(),
         audio_panel_click_through: *state.audio_panel_click_through.lock().unwrap(),
+        translate_enabled: *state.translate_enabled.lock().unwrap(),
+        translate_engine: state.translate_engine.lock().unwrap().clone(),
+        translate_ms_region: state.translate_ms_region.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -278,6 +297,7 @@ fn cleanup_on_exit(app: &AppHandle) {
     perf::stop();
     privacy::stop();
     audio::stop();
+    translate::stop();
     hotkey::unregister_all();
     icons::restore_icons();
     let state = app.state::<std::sync::Arc<AppState>>();
@@ -470,6 +490,14 @@ fn install_nccalc_fix(window: &tauri::WebviewWindow) {
     }
 }
 
+/// 辅助窗口「无边框 + 工具窗口 + 全客户区」完整配方（show 前调用，
+/// 防止 wry show 时重置 exstyle / 样式位导致出现矩形虚框或标题框）
+#[cfg(target_os = "windows")]
+pub(crate) fn prepare_aux_window(window: &tauri::WebviewWindow) {
+    make_tool_window(window);
+    install_nccalc_fix(window);
+}
+
 /// 把辅助窗口标记为「工具窗口」：加 WS_EX_TOOLWINDOW、清 WS_EX_APPWINDOW。
 ///
 /// 目的：Tauri 2 的 skipTaskbar 在 Windows 上未设置 TOOLWINDOW 样式
@@ -564,6 +592,106 @@ fn make_tool_window(window: &tauri::WebviewWindow) {
 #[tauri::command]
 fn get_state(state: State<std::sync::Arc<AppState>>) -> Snapshot {
     snapshot(&state)
+}
+
+/// 开关「鼠标选取翻译」（v0.20.0）：关闭时立即隐藏翻译窗口并停止检测
+#[tauri::command]
+fn set_translate_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut e = state.translate_enabled.lock().unwrap();
+        if *e == enabled {
+            drop(e);
+            return snapshot(&state);
+        }
+        *e = enabled;
+    }
+    translate::set_enabled(enabled);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置翻译引擎（"ai" = 用户配置的 AI 助理 / "microsoft" = 微软翻译）
+#[tauri::command]
+fn set_translate_engine(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    engine: String,
+) -> Snapshot {
+    let engine = if engine == "microsoft" {
+        "microsoft".to_string()
+    } else {
+        "ai".to_string()
+    };
+    *state.translate_engine.lock().unwrap() = engine;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置微软翻译区域（Region）
+#[tauri::command]
+fn set_translate_ms_region(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    region: String,
+) -> Snapshot {
+    *state.translate_ms_region.lock().unwrap() = region.trim().to_string();
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 保存微软翻译 API Key（DPAPI 加密落盘，与 AI Key 同级）
+#[tauri::command]
+fn save_translate_ms_key(api_key: String) -> Result<(), String> {
+    ai::save_encrypted_key(translate::MS_KEY_FILE, &api_key)
+}
+
+/// 点击翻译按钮：显示弹窗并按所选引擎发起翻译
+#[tauri::command]
+fn translate_open(app: AppHandle, state: State<std::sync::Arc<AppState>>) {
+    let cfg = translate::TranslateConfig {
+        engine: state.translate_engine.lock().unwrap().clone(),
+        ai_model: state.ai_model.lock().unwrap().clone(),
+        ai_base_url: state.ai_base_url.lock().unwrap().clone(),
+        ms_region: state.translate_ms_region.lock().unwrap().clone(),
+    };
+    translate::open_popup(app, cfg);
+}
+
+/// 隐藏翻译按钮与弹窗（点击外部 / 弹窗失焦 / Esc 时调用）
+#[tauri::command]
+fn translate_hide(app: AppHandle) {
+    translate::hide(&app);
+}
+
+/// 系统主音量（0.0~1.0，FR-18 扩展：音频面板音量调节条）
+#[tauri::command]
+fn get_system_volume() -> Result<f32, String> {
+    volume::get_level()
+}
+
+#[tauri::command]
+fn set_system_volume(level: f32) -> Result<(), String> {
+    volume::set_level(level)
+}
+
+#[tauri::command]
+fn get_system_mute() -> Result<bool, String> {
+    volume::get_mute()
+}
+
+#[tauri::command]
+fn set_system_mute(mute: bool) -> Result<(), String> {
+    volume::set_mute(mute)
 }
 
 #[tauri::command]
@@ -1234,7 +1362,7 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
         // wry/Tauri 在窗口 show 时会重置 exstyle（实测音频面板 show 后 EX_APPWINDOW 复现），
         // 需周期确保 TOOLWINDOW 生效（不出现 Alt+Tab / 任务视图）
         if tick % 25 == 0 {
-            for label in ["ai-popup", "audio-panel"] {
+            for label in ["ai-popup", "audio-panel", "translate-button", "translate-popup"] {
                 if let Some(win) = app.get_webview_window(label) {
                     make_tool_window(&win);
                 }
@@ -1309,6 +1437,9 @@ pub fn run() {
     *state.audio_panel_y.lock().unwrap() = prefs.audio_panel_y;
     *state.audio_panel_opacity.lock().unwrap() = prefs.audio_panel_opacity;
     *state.audio_panel_click_through.lock().unwrap() = prefs.audio_panel_click_through;
+    *state.translate_enabled.lock().unwrap() = prefs.translate_enabled;
+    *state.translate_engine.lock().unwrap() = prefs.translate_engine.clone();
+    *state.translate_ms_region.lock().unwrap() = prefs.translate_ms_region.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -1343,6 +1474,16 @@ pub fn run() {
             set_audio_panel_opacity,
             set_audio_panel_click_through,
             audio_media_control,
+            set_translate_enabled,
+            set_translate_engine,
+            set_translate_ms_region,
+            save_translate_ms_key,
+            translate_open,
+            translate_hide,
+            get_system_volume,
+            set_system_volume,
+            get_system_mute,
+            set_system_mute,
             get_perf_snapshot,
             get_ai_config,
             ai::save_ai_key,
@@ -1380,7 +1521,7 @@ pub fn run() {
             privacy::start();
             let app_handle = app.handle().clone();
             // 辅助窗口：工具窗口样式 + 系统圆角 + WM_NCCALCSIZE 全客户区（彻底无标题栏）
-            for label in ["ai-popup", "audio-panel"] {
+            for label in ["ai-popup", "audio-panel", "translate-button", "translate-popup"] {
                 if let Some(win) = app.get_webview_window(label) {
                     make_tool_window(&win);
                     install_nccalc_fix(&win);
@@ -1397,6 +1538,9 @@ pub fn run() {
             // 音频识别（FR-18）：启动轮询并按持久化开关设置
             audio::set_enabled(*state.audio_panel_enabled.lock().unwrap());
             audio::start(app_handle.clone());
+            // 鼠标选取翻译（v0.20.0）：按持久化开关设置后安装全局钩子
+            translate::set_enabled(*state.translate_enabled.lock().unwrap());
+            translate::start(app_handle.clone());
             if *state.taskbar_transparent.lock().unwrap() {
                 sync_taskbar(&app_handle, &state);
             }
@@ -1420,6 +1564,11 @@ pub fn run() {
                 let app = window.app_handle();
                 if window.label() == "ai-popup" {
                     // AI 小窗：关闭 = 隐藏（对话上下文由前端在隐藏时清空，不落盘）
+                    let _ = window.hide();
+                    return;
+                }
+                if window.label() == "translate-popup" || window.label() == "translate-button" {
+                    // 翻译窗口：关闭 = 隐藏（由全局钩子统一管理显隐）
                     let _ = window.hide();
                     return;
                 }

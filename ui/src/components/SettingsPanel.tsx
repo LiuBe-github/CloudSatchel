@@ -25,6 +25,7 @@ interface SettingsPanelProps {
   audioPanelClickThrough: boolean;
   onAudioOpacityChange: (opacity: number) => void;
   onAudioClickThroughChange: (enabled: boolean) => void;
+
   background: BackgroundSettings;
   backgroundName: string;
   onBackgroundChange: (next: BackgroundSettings) => void;
@@ -81,6 +82,7 @@ export function SettingsPanel({
   audioPanelClickThrough,
   onAudioOpacityChange,
   onAudioClickThroughChange,
+
   background,
   backgroundName,
   onBackgroundChange,
@@ -424,7 +426,7 @@ export function SettingsPanel({
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.19.0</span>
+          <span className="settings-version">云笈 · v0.20.3</span>
         </div>
       </div>
     </div>

@@ -14,6 +14,10 @@ import {
   setAudioPanelEnabled,
   setAudioPanelOpacity,
   setAudioPanelClickThrough,
+  setTranslateEnabled,
+  setTranslateEngine,
+  setTranslateMsRegion,
+  saveTranslateMsKey,
   setAutohideEnabled,
   setPerfIntervalMs,
   setAutostart,
@@ -34,6 +38,7 @@ import { AboutPanel } from "./components/AboutPanel";
 import { BackgroundLayer } from "./components/BackgroundLayer";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { AiPanel } from "./components/AiPanel";
+import { TranslatePanel } from "./components/TranslatePanel";
 import { Toast, type ToastHandle } from "./components/Toast";
 import appIcon from "./assets/app-icon.png";
 
@@ -85,6 +90,14 @@ const FEATURES = [
     detail:
       "开启后桌面右下角显示当前播放的音源、标题与进度，支持上一首 / 暂停播放 / 下一首控制与波形可视化；无播放自动隐藏，全屏时隐藏。音源信息通过系统媒体会话（SMTC）本地读取，不联网。",
   },
+  {
+    id: "translate",
+    icon: "译",
+    title: "鼠标选取翻译",
+    subtitle: "选中文字松手即弹「翻译」按钮，点击出译文",
+    detail:
+      "开启后，在任意应用选中一段文字并松开鼠标，文字下方会出现「翻译」按钮；点击弹出翻译界面（引擎可在详情页选择 AI 助理或微软翻译），点击其他位置或按 Esc 即关闭，不影响原应用。",
+  },
 ];
 
 function backgroundOf(state: AppState): BackgroundSettings {
@@ -124,6 +137,10 @@ function App({ initial }: AppProps) {
       audioPanelY: -1,
       audioPanelOpacity: 75,
       audioPanelClickThrough: false,
+      translateEnabled: true,
+      translateEngine: "ai",
+      translateMsRegion: "",
+      translateHasMsKey: false,
       fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
@@ -195,13 +212,16 @@ function App({ initial }: AppProps) {
       const isPerformance = activeId === FEATURES[2].id;
       const isPrivacy = activeId === FEATURES[3].id;
       const isAudio = activeId === FEATURES[5].id;
+      const isTranslate = activeId === FEATURES[6].id;
       const next = isPerformance
         ? await setPerformanceMonitor(!state.performanceMonitor)
         : isPrivacy
           ? await setPrivacyEnabled(!state.privacyEnabled)
           : isAudio
             ? await setAudioPanelEnabled(!state.audioPanelEnabled)
-            : await setEnabled(!state.enabled);
+            : isTranslate
+              ? await setTranslateEnabled(!state.translateEnabled)
+              : await setEnabled(!state.enabled);
       setState(next);
       if (isPerformance) {
         toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
@@ -213,6 +233,8 @@ function App({ initial }: AppProps) {
         );
       } else if (isAudio) {
         toastRef.current?.show(next.audioPanelEnabled ? "音频识别已开启" : "音频识别已关闭");
+      } else if (isTranslate) {
+        toastRef.current?.show(next.translateEnabled ? "鼠标选取翻译已开启" : "鼠标选取翻译已关闭");
       } else if (next.enabled) {
         toastRef.current?.show("功能已激活，现在可以双击桌面空白处切换图标");
       } else {
@@ -224,7 +246,7 @@ function App({ initial }: AppProps) {
     } finally {
       setBusyToggle(false);
     }
-  }, [busyToggle, state.enabled, state.performanceMonitor, state.privacyEnabled, state.audioPanelEnabled, activeId]);
+  }, [busyToggle, state.enabled, state.performanceMonitor, state.privacyEnabled, state.audioPanelEnabled, state.translateEnabled, activeId]);
 
   const handleTheme = useCallback(
     async (mode: ThemeMode) => {
@@ -325,6 +347,43 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
+  const handleTranslateEnabledChange = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setTranslateEnabled(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "鼠标选取翻译已开启" : "鼠标选取翻译已关闭");
+    } catch (err) {
+      console.error("切换鼠标选取翻译失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleTranslateEngineChange = useCallback(async (engine: string) => {
+    try {
+      const next = await setTranslateEngine(engine);
+      setState(next);
+    } catch (err) {
+      console.error("更新翻译引擎失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleTranslateMsRegionChange = useCallback(async (region: string) => {
+    try {
+      const next = await setTranslateMsRegion(region);
+      setState(next);
+    } catch (err) {
+      console.error("更新微软翻译区域失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleSaveTranslateMsKey = useCallback(async (apiKey: string) => {
+    await saveTranslateMsKey(apiKey);
+    const s = await getState();
+    setState(s);
+  }, []);
+
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
     try {
       const next = await setAutohideEnabled(enabled);
@@ -405,13 +464,16 @@ function App({ initial }: AppProps) {
   const isPrivacy = activeId === FEATURES[3].id;
   const isAi = activeId === FEATURES[4].id;
   const isAudio = activeId === FEATURES[5].id;
+  const isTranslate = activeId === FEATURES[6].id;
   const featureOn = isPerformance
     ? state.performanceMonitor
     : isPrivacy
       ? state.privacyEnabled
       : isAudio
         ? state.audioPanelEnabled
-        : state.enabled;
+        : isTranslate
+          ? state.translateEnabled
+          : state.enabled;
   const stateHint = isPerformance
     ? state.performanceMonitor
       ? "性能监控 · 当前已开启"
@@ -424,7 +486,11 @@ function App({ initial }: AppProps) {
         ? state.audioPanelEnabled
           ? "音频识别 · 播放时右下角显示媒体面板"
           : "音频识别 · 当前已关闭"
-        : state.iconsHidden
+        : isTranslate
+          ? state.translateEnabled
+            ? "选取翻译 · 选中文字松手即出现「翻译」按钮"
+            : "选取翻译 · 当前已关闭"
+          : state.iconsHidden
           ? "桌面图标 · 当前已隐藏"
           : "桌面图标 · 当前已显示";
 
@@ -498,7 +564,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.19.0</div>
+          <div className="sidebar-version">v0.20.3</div>
           </div>
         </aside>
 
@@ -559,6 +625,17 @@ function App({ initial }: AppProps) {
 
               <p className="detail-note">{feature.detail}</p>
             </div>
+          ) : isTranslate ? (
+            <TranslatePanel
+              enabled={state.translateEnabled}
+              engine={state.translateEngine}
+              msRegion={state.translateMsRegion}
+              hasMsKey={state.translateHasMsKey}
+              onEnabledChange={handleTranslateEnabledChange}
+              onEngineChange={handleTranslateEngineChange}
+              onRegionChange={handleTranslateMsRegionChange}
+              onSaveMsKey={handleSaveTranslateMsKey}
+            />
           ) : (
             <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
               <div className="detail-hero">
@@ -601,7 +678,9 @@ function App({ initial }: AppProps) {
                     ? "仅在你发送消息时访问你配置的接口地址 · Key 本地加密保存 · 对话不落盘"
                     : isAudio
                       ? "SMTC 本地读取音源 · WASAPI 波形 · 不联网 · 无播放自动隐藏"
-                      : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
+                      : isTranslate
+                        ? "仅点击「翻译」时联网 · Key 本地加密保存 · 不记录对话内容"
+                        : "桌面空白处双击可快速切换 · 仅当功能激活时生效"}
           </div>
         </section>
 
@@ -627,6 +706,7 @@ function App({ initial }: AppProps) {
           audioPanelClickThrough={state.audioPanelClickThrough}
           onAudioOpacityChange={handleAudioOpacityChange}
           onAudioClickThroughChange={handleAudioClickThroughChange}
+
           background={backgroundOf(state)}
           backgroundName={backgroundName}
           onBackgroundChange={handleBackgroundChange}

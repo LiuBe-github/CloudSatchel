@@ -3,11 +3,14 @@
 //! - SMTC（`GlobalSystemMediaTransportControlsSessionManager`）读取当前播放会话
 //!   （应用名、标题、播放状态、进度），并发送上一首 / 暂停 / 播放 / 下一首控制命令。
 //!   仅本地系统 API，不联网、不写注册表。
+//!   v0.19.1 起改为事件驱动：订阅 CurrentSessionChanged / SessionsChanged 与
+//!   会话级 MediaPropertiesChanged / PlaybackInfoChanged / TimelinePropertiesChanged，
+//!   系统有变化才读取并推送，不再每秒轮询（避免持续唤醒 Windows NPSM 服务导致 CPU 高占用）。
 //! - WASAPI loopback 采集系统音频输出 + FFT 生成 16 档波形数据（`audio-wave` 事件）；
 //!   无播放时停止采集（慢轮询空转），降低开销。
 //!
 //! 事件：
-//! - `media-state`（MediaState JSON）：媒体会话状态，约 1 秒轮询
+//! - `media-state`（MediaState JSON）：媒体会话状态，事件驱动推送
 //! - `audio-wave`（number[16]）：波形频段能量，约 100ms 一帧（仅播放时）
 //!
 //! 兼容性：SMTC 需要 Win10 1809+；不支持的版本 `supported=false`，前端隐藏面板。
@@ -16,6 +19,7 @@
 
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -24,10 +28,17 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use windows::ApplicationModel::AppInfo;
-use windows::core::HSTRING;
+use windows::core::{HSTRING, Interface};
+use windows::Foundation::TypedEventHandler;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager,
+    GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionMediaProperties,
+    CurrentSessionChangedEventArgs,
+    MediaPropertiesChangedEventArgs,
+    PlaybackInfoChangedEventArgs,
+    SessionsChangedEventArgs,
+    TimelinePropertiesChangedEventArgs,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
 use windows::Storage::Streams::{DataReader, IInputStream, IRandomAccessStreamReference};
@@ -41,8 +52,15 @@ use windows::Win32::System::Com::{
 
 use crate::dlog;
 
-/// SMTC 轮询间隔（毫秒）
-const SMTC_POLL_MS: u64 = 1000;
+/// SMTC 事件驱动间隔（毫秒）
+const SMTC_RETRY_MS: u64 = 3000;
+const SMTC_FLAG_POLL_MS: u64 = 200;
+/// 切歌后等待缩略图“安定”再重读的时间（应用更新封面是异步的）
+const THUMB_SETTLE_MS: u64 = 400;
+/// 空封面重读间隔（浏览器等封面常异步加载，过早接受会永久丢封面）
+const THUMB_EMPTY_RETRY_MS: u64 = 1000;
+/// 空封面最多重读次数，之后接受为空（避免持续空转）
+const THUMB_EMPTY_MAX_TRIES: u32 = 3;
 /// 波形采集帧间隔（毫秒，仅播放时）
 const WAVE_POLL_MS: u64 = 100;
 /// 波形频段数（前端渲染条数）
@@ -54,9 +72,24 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static THREAD: OnceLock<()> = OnceLock::new();
 
+/// 封面缓存条目：候选/确认两段式，防切歌瞬间读到上一首封面后永久缓存错图。
+struct ThumbEntry {
+    /// 曲目标识键（标题|艺术家|专辑|应用）
+    key: String,
+    /// data URL（空串 = 无封面 / 未就绪）
+    value: String,
+    /// 是否已确认（非空值连续两次读取一致；空值重试达上限后确认）
+    confirmed: bool,
+    /// 最近一次写入候选的时间（用于安定重读计时）
+    seen_at: std::time::Instant,
+    /// 空封面重读次数
+    empty_tries: u32,
+}
+
 /// 封面缓存：键 = 曲目标识（标题|艺术家|专辑|应用），值 = data URL。
-/// SMTC 缩略图几乎不随同一首歌变化，缓存避免每 1 秒重新解码 / base64 大图。
-static THUMB_CACHE: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// 切歌瞬间 SMTC 缩略图可能仍是上一首（应用异步更新），单槽直接命中会
+/// 永久显示错图；空封面在浏览器里也常异步加载，因此不能一读就缓存。
+static THUMB_CACHE: Mutex<Option<ThumbEntry>> = Mutex::new(None);
 
 /// 媒体会话状态（emit `media-state`）
 #[derive(Debug, Clone, Serialize)]
@@ -152,7 +185,7 @@ pub fn control(app: AppHandle, action: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// SMTC 轮询
+// SMTC 事件驱动
 // ---------------------------------------------------------------------------
 
 /// 安全地初始化 COM（MTA）
@@ -163,27 +196,36 @@ unsafe fn co_init() -> bool {
 fn smtc_loop(app: AppHandle) {
     dlog::write("[audio] smtc loop started");
     let need_uninit = unsafe { co_init() };
-    let mut last_state: Option<String> = None;
+    let mut reported_unsupported = false;
 
     loop {
-        std::thread::sleep(Duration::from_millis(SMTC_POLL_MS));
         if !RUNNING.load(Ordering::SeqCst) {
             break;
         }
         if !ENABLED.load(Ordering::SeqCst) {
-            if last_state.take().is_some() {
-                let _ = app.emit("media-state", MediaState::idle());
-            }
+            std::thread::sleep(Duration::from_millis(SMTC_FLAG_POLL_MS));
             continue;
         }
 
-        let state = read_current_session();
-        // 仅状态变化时推送，减少事件量（进度每 5 秒强制刷新一次亦可；简单起见状态变化才推）
-        let key = serde_json::to_string(&state).unwrap_or_default();
-        if last_state.as_deref() != Some(key.as_str()) {
-            last_state = Some(key);
-            let _ = app.emit("media-state", state);
+        match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+            Ok(operation) => match operation.get() {
+                Ok(manager) => {
+                    reported_unsupported = false;
+                    run_smtc_events(app.clone(), manager);
+                    continue;
+                }
+                Err(e) => dlog::write(&format!("[audio] smtc manager init failed: {e}")),
+            },
+            Err(e) => dlog::write(&format!("[audio] smtc manager request failed: {e}")),
         }
+
+        if !reported_unsupported {
+            reported_unsupported = true;
+            let mut idle = MediaState::idle();
+            idle.supported = false;
+            let _ = app.emit("media-state", idle);
+        }
+        std::thread::sleep(Duration::from_millis(SMTC_RETRY_MS));
     }
     if need_uninit {
         unsafe { CoUninitialize() };
@@ -191,10 +233,206 @@ fn smtc_loop(app: AppHandle) {
     dlog::write("[audio] smtc loop stopped");
 }
 
-/// 读取当前 SMTC 会话状态（失败 / 无会话 → idle）
-fn read_current_session() -> MediaState {
-    let result = (|| -> windows::core::Result<MediaState> {
-        let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
+/// 事件等待循环：订阅 manager 与会话级事件，收到事件才读取并推送 media-state。
+/// 空闲时完全不访问 SMTC（仅 200ms 空转检查开关/退出标志）。
+fn run_smtc_events(app: AppHandle, manager: GlobalSystemMediaTransportControlsSessionManager) {
+    let (tx, rx) = mpsc::channel::<()>();
+
+    let mut manager_tokens: Vec<(ManagerEventKind, i64)> = Vec::new();
+    {
+        let tx1 = tx.clone();
+        match manager.CurrentSessionChanged(&TypedEventHandler::<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs>::new(move |_, _| {
+            let _ = tx1.send(());
+            Ok(())
+        })) {
+            Ok(token) => manager_tokens.push((ManagerEventKind::CurrentSession, token)),
+            Err(e) => dlog::write(&format!("[audio] CurrentSessionChanged subscribe failed: {e}")),
+        }
+    }
+    {
+        let tx1 = tx.clone();
+        match manager.SessionsChanged(&TypedEventHandler::<GlobalSystemMediaTransportControlsSessionManager, SessionsChangedEventArgs>::new(move |_, _| {
+            let _ = tx1.send(());
+            Ok(())
+        })) {
+            Ok(token) => manager_tokens.push((ManagerEventKind::Sessions, token)),
+            Err(e) => dlog::write(&format!("[audio] SessionsChanged subscribe failed: {e}")),
+        }
+    }
+
+    let mut session_sub: Option<SessionSub> = None;
+    let mut last_state: Option<String> = None;
+    let mut thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+
+    loop {
+        match rx.recv_timeout(Duration::from_millis(SMTC_FLAG_POLL_MS)) {
+            Ok(()) => {
+                if !RUNNING.load(Ordering::SeqCst) || !ENABLED.load(Ordering::SeqCst) {
+                    break;
+                }
+                thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if !RUNNING.load(Ordering::SeqCst) || !ENABLED.load(Ordering::SeqCst) {
+                    break;
+                }
+                // 封面安定/重试到点：事件不会再来也强制重读一次，纠正切歌错图与
+                // 浏览器异步加载的封面（仅当前键未确认才触发，空转无开销）
+                if let Some(k) = thumb_key.as_deref() {
+                    if thumbnail_refresh_due_for(k) {
+                        thumb_key =
+                            refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+                    }
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    if let Some(sub) = session_sub.take() {
+        sub.unsubscribe();
+    }
+    for (kind, token) in &manager_tokens {
+        let _ = kind.remove(&manager, *token);
+    }
+    if !ENABLED.load(Ordering::SeqCst) {
+        let _ = app.emit("media-state", MediaState::idle());
+    }
+}
+
+enum ManagerEventKind {
+    CurrentSession,
+    Sessions,
+}
+
+impl ManagerEventKind {
+    fn remove(
+        &self,
+        manager: &GlobalSystemMediaTransportControlsSessionManager,
+        token: i64,
+    ) -> windows::core::Result<()> {
+        match self {
+            ManagerEventKind::CurrentSession => manager.RemoveCurrentSessionChanged(token),
+            ManagerEventKind::Sessions => manager.RemoveSessionsChanged(token),
+        }
+    }
+}
+
+enum SessionEventKind {
+    MediaProperties,
+    PlaybackInfo,
+    TimelineProperties,
+}
+
+struct SessionSub {
+    session: GlobalSystemMediaTransportControlsSession,
+    tokens: Vec<(SessionEventKind, i64)>,
+}
+
+impl SessionSub {
+    fn subscribe(
+        session: &GlobalSystemMediaTransportControlsSession,
+        tx: Sender<()>,
+    ) -> windows::core::Result<Self> {
+        let mut tokens = Vec::new();
+        {
+            let tx1 = tx.clone();
+            let token = session.MediaPropertiesChanged(&TypedEventHandler::<GlobalSystemMediaTransportControlsSession, MediaPropertiesChangedEventArgs>::new(move |_, _| {
+                let _ = tx1.send(());
+                Ok(())
+            }))?;
+            tokens.push((SessionEventKind::MediaProperties, token));
+        }
+        {
+            let tx1 = tx.clone();
+            let token = session.PlaybackInfoChanged(&TypedEventHandler::<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>::new(move |_, _| {
+                let _ = tx1.send(());
+                Ok(())
+            }))?;
+            tokens.push((SessionEventKind::PlaybackInfo, token));
+        }
+        {
+            let tx1 = tx.clone();
+            let token = session.TimelinePropertiesChanged(&TypedEventHandler::<GlobalSystemMediaTransportControlsSession, TimelinePropertiesChangedEventArgs>::new(move |_, _| {
+                let _ = tx1.send(());
+                Ok(())
+            }))?;
+            tokens.push((SessionEventKind::TimelineProperties, token));
+        }
+        Ok(Self {
+            session: session.clone(),
+            tokens,
+        })
+    }
+
+    fn unsubscribe(&self) {
+        for (kind, token) in &self.tokens {
+            let _ = match kind {
+                SessionEventKind::MediaProperties => {
+                    self.session.RemoveMediaPropertiesChanged(*token)
+                }
+                SessionEventKind::PlaybackInfo => {
+                    self.session.RemovePlaybackInfoChanged(*token)
+                }
+                SessionEventKind::TimelineProperties => {
+                    self.session.RemoveTimelinePropertiesChanged(*token)
+                }
+            };
+        }
+    }
+}
+
+/// 会话级事件订阅随当前会话变化而重建；随后读取最新状态并按需推送。
+/// 返回当前会话的封面缓存键（无会话 / 不支持时返回 None），供事件循环做安定重读。
+fn refresh_smtc(
+    manager: &GlobalSystemMediaTransportControlsSessionManager,
+    session_sub: &mut Option<SessionSub>,
+    tx: &Sender<()>,
+    app: &AppHandle,
+    last_state: &mut Option<String>,
+) -> Option<String> {
+    match manager.GetCurrentSession() {
+        Ok(session) => {
+            let need_subscribe = match session_sub.as_ref() {
+                Some(sub) => sub.session.as_raw() != session.as_raw(),
+                None => true,
+            };
+            if need_subscribe {
+                if let Some(old) = session_sub.take() {
+                    old.unsubscribe();
+                }
+                match SessionSub::subscribe(&session, tx.clone()) {
+                    Ok(sub) => *session_sub = Some(sub),
+                    Err(e) => dlog::write(&format!("[audio] session events subscribe failed: {e}")),
+                }
+            }
+        }
+        Err(_) => {
+            if let Some(old) = session_sub.take() {
+                old.unsubscribe();
+            }
+        }
+    }
+
+    let (state, thumb_key) = read_current_session(manager);
+    let key = serde_json::to_string(&state).unwrap_or_default();
+    if last_state.as_deref() != Some(key.as_str()) {
+        *last_state = Some(key);
+        let _ = app.emit("media-state", &state);
+    }
+    if state.active {
+        Some(thumb_key)
+    } else {
+        None
+    }
+}
+
+/// 读取当前 SMTC 会话状态（失败 / 无会话 → idle）。
+/// 返回 (状态, 封面缓存键)；无会话时缓存键为空串。
+fn read_current_session(
+    manager: &GlobalSystemMediaTransportControlsSessionManager,
+) -> (MediaState, String) {
+    let result = (|| -> windows::core::Result<(MediaState, String)> {
         let session = manager.GetCurrentSession()?;
         let playback = session.GetPlaybackInfo()?;
         let controls = playback.Controls()?;
@@ -219,54 +457,127 @@ fn read_current_session() -> MediaState {
         let thumb_key = format!("{title}|{artist}|{album}|{app_name}");
         let thumbnail = cached_thumbnail(&thumb_key, || read_thumbnail(&props));
 
-        Ok(MediaState {
-            active: true,
-            playing,
-            thumbnail,
-            app_name,
-            title,
-            artist,
-            album,
-            position_secs: position,
-            duration_secs: end,
-            prev_enabled: controls.IsPreviousEnabled().unwrap_or(false),
-            next_enabled: controls.IsNextEnabled().unwrap_or(false),
-            play_enabled: controls.IsPlayEnabled().unwrap_or(true),
-            pause_enabled: controls.IsPauseEnabled().unwrap_or(true),
-            supported: true,
-        })
+        Ok((
+            MediaState {
+                active: true,
+                playing,
+                thumbnail,
+                app_name,
+                title,
+                artist,
+                album,
+                position_secs: position,
+                duration_secs: end,
+                prev_enabled: controls.IsPreviousEnabled().unwrap_or(false),
+                next_enabled: controls.IsNextEnabled().unwrap_or(false),
+                play_enabled: controls.IsPlayEnabled().unwrap_or(true),
+                pause_enabled: controls.IsPauseEnabled().unwrap_or(true),
+                supported: true,
+            },
+            thumb_key,
+        ))
     })();
 
     match result {
-        Ok(state) => state,
+        Ok((state, key)) => (state, key),
         Err(_) => {
             // 无会话（GetCurrentSession 返回 null → Err）或系统不支持 SMTC
             let mut idle = MediaState::idle();
-            idle.supported = smtc_available();
-            idle
+            idle.supported = true;
+            (idle, String::new())
         }
     }
 }
 
 /// 按缓存键返回缩略图；未命中时调用 `load` 生成并写入缓存。
-/// SMTC 缩略图解码 / base64 较耗，同一首歌只读取一次。
+/// 切歌瞬间 SMTC 缩略图可能仍是上一首（应用异步更新），若直接命中会永久
+/// 显示错图，因此采用「候选 → 连续两次一致 → 确认」的两段式确认：
+/// - 键变化后的首次读取只作为候选（pending），不立即确认；
+/// - 事件循环在 THUMB_SETTLE_MS 后强制重读（见 thumbnail_refresh_due_for），
+///   与候选一致才确认；不一致则更新候选继续等待；
+/// - 空封面不确认，按 THUMB_EMPTY_RETRY_MS 重读，超过 THUMB_EMPTY_MAX_TRIES
+///   次仍为空才确认（浏览器封面常异步加载，过早接受会永久丢封面）。
 fn cached_thumbnail(key: &str, load: impl FnOnce() -> String) -> String {
-    if let Ok(guard) = THUMB_CACHE.lock() {
-        if let Some((k, v)) = guard.as_ref() {
-            if k == key {
-                return v.clone();
+    // 已确认且同键：直接使用缓存，不再反复解码 / base64
+    {
+        if let Ok(guard) = THUMB_CACHE.lock() {
+            if let Some(entry) = guard.as_ref() {
+                if entry.key == key && entry.confirmed {
+                    return entry.value.clone();
+                }
             }
         }
     }
+
     let value = load();
-    if let Ok(mut guard) = THUMB_CACHE.lock() {
-        *guard = Some((key.to_string(), value.clone()));
+    let result = if let Ok(mut guard) = THUMB_CACHE.lock() {
+        match guard.as_mut() {
+            Some(entry) if entry.key == key && !entry.confirmed => {
+                if value.is_empty() {
+                    // 空封面：继续重试，达到上限后接受为空
+                    entry.empty_tries += 1;
+                    if entry.empty_tries >= THUMB_EMPTY_MAX_TRIES {
+                        entry.confirmed = true;
+                    } else {
+                        entry.seen_at = std::time::Instant::now();
+                    }
+                } else if entry.value == value {
+                    // 非空候选连续两次一致 → 确认
+                    entry.confirmed = true;
+                    dlog::write(&format!(
+                        "[audio] thumb confirmed key={key} bytes={}",
+                        value.len()
+                    ));
+                } else {
+                    // 候选变化（上一首封面 → 本首封面）：更新并重新安定计时
+                    dlog::write(&format!(
+                        "[audio] thumb settled key={key} old_bytes={} new_bytes={}",
+                        entry.value.len(),
+                        value.len()
+                    ));
+                    entry.value = value;
+                    entry.empty_tries = 0;
+                    entry.seen_at = std::time::Instant::now();
+                }
+                entry.value.clone()
+            }
+            _ => {
+                *guard = Some(ThumbEntry {
+                    key: key.to_string(),
+                    value,
+                    confirmed: false,
+                    seen_at: std::time::Instant::now(),
+                    empty_tries: 0,
+                });
+                guard.as_ref().unwrap().value.clone()
+            }
+        }
+    } else {
+        value
+    };
+    result
+}
+
+/// 当前键的缩略图是否到安定/重试时间（事件循环在超时 tick 中调用）。
+/// 仅在键未确认时返回 true，避免持续空转。
+fn thumbnail_refresh_due_for(key: &str) -> bool {
+    if let Ok(guard) = THUMB_CACHE.lock() {
+        if let Some(entry) = guard.as_ref() {
+            if entry.key == key && !entry.confirmed {
+                let delay = if entry.value.is_empty() {
+                    THUMB_EMPTY_RETRY_MS
+                } else {
+                    THUMB_SETTLE_MS
+                };
+                return entry.seen_at.elapsed() >= Duration::from_millis(delay);
+            }
+        }
     }
-    value
+    false
 }
 
 /// 读取 SMTC 缩略图流 → data URL（`data:<mime>;base64,`）。
-/// 失败 / 无封面 / 无法识别的图片格式 → 返回空串（前端隐藏封面占位）。
+/// 失败 / 无封面 / 无法识别的图片格式 → 返回空串（前端以云笈图标占位）。
 fn read_thumbnail(props: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> String {
     const MAX_BYTES: u32 = 1_500_000; // 缩略图上限约 1.5MB，防异常大图拖垮轮询
     let result = (|| -> windows::core::Result<String> {
@@ -295,6 +606,15 @@ fn read_thumbnail(props: &GlobalSystemMediaTransportControlsSessionMediaProperti
             "image/gif"
         } else if bytes.starts_with(b"BM") {
             "image/bmp"
+        } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+            // 浏览器（Edge/Chrome）媒体会话 artwork 常用 WebP
+            "image/webp"
+        } else if bytes.len() >= 12
+            && &bytes[4..8] == b"ftyp"
+            && (&bytes[8..12] == b"avif" || &bytes[8..12] == b"avis")
+        {
+            // 部分站点提供 AVIF 封面
+            "image/avif"
         } else {
             return Ok(String::new());
         };
@@ -304,12 +624,7 @@ fn read_thumbnail(props: &GlobalSystemMediaTransportControlsSessionMediaProperti
     result.unwrap_or_default()
 }
 
-/// 系统是否支持 SMTC（尝试创建 manager，成功即支持）
-fn smtc_available() -> bool {
-    GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
-        .map(|op| op.get().is_ok())
-        .unwrap_or(false)
-}
+
 
 /// 把 AUMID 转成人类可读的应用显示名。
 /// 打包应用（MSIX）可通过 AppInfo 查询 DisplayName（如 "Apple Music"）；

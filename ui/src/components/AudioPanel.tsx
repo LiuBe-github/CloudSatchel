@@ -5,11 +5,16 @@ import { useThemeInit } from "../lib/theme";
 import {
   audioMediaControl,
   getState,
+  getSystemMute,
+  getSystemVolume,
   inTauri,
   onAudioWave,
   onMediaState,
   onStateUpdate,
+  setSystemMute,
+  setSystemVolume,
 } from "../lib/bridge";
+import appIcon from "../assets/app-icon.png";
 
 /** 从封面图中提取主色（带饱和度的像素均值），稍作提亮作为强调色 */
 function extractAccent(src: string): Promise<string> {
@@ -83,7 +88,12 @@ export default function AudioPanel() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [opacity, setOpacity] = useState(75);
   const [accent, setAccent] = useState("");
+  const [volume, setVolume] = useState(50);
+  const [muted, setMuted] = useState(false);
+  const volTimerRef = useRef<number | null>(null);
   const waveRef = useRef<number[]>([]);
+  const mediaRef = useRef<{ positionSecs: number; at: number }>({ positionSecs: 0, at: 0 });
+  const [, setProgressTick] = useState(0);
 
   // 初始化：应用持久化位置或计算右下角默认位置；只定位、不显示窗口。
   // 是否显示完全交给下方 visible effect——启动时若没有媒体会话（media 为
@@ -126,9 +136,39 @@ export default function AudioPanel() {
     });
   }, []);
 
+  // 读取系统音量与静音状态（音量调节条，v0.20.0）
+  useEffect(() => {
+    if (!inTauri()) return;
+    void getSystemVolume()
+      .then((v) => setVolume(Math.round(v * 100)))
+      .catch(() => {});
+    void getSystemMute().then(setMuted).catch(() => {});
+    return () => {
+      if (volTimerRef.current) window.clearTimeout(volTimerRef.current);
+    };
+  }, []);
+
+  const onVolumeChange = (v: number) => {
+    setVolume(v);
+    if (volTimerRef.current) window.clearTimeout(volTimerRef.current);
+    // 滑块拖动高频触发：80ms 节流后写系统音量
+    volTimerRef.current = window.setTimeout(() => {
+      void setSystemVolume(v / 100).catch(() => {});
+    }, 80);
+  };
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    void setSystemMute(next).catch(() => setMuted(!next));
+  };
+
   // 订阅 SMTC 状态 / 波形 / 全屏状态
   useEffect(() => {
-    const offMedia = onMediaState((s) => setMedia(s));
+    const offMedia = onMediaState((s) => {
+      mediaRef.current = { positionSecs: s.positionSecs, at: Date.now() };
+      setMedia(s);
+    });
     const offWave = onAudioWave((w) => {
       waveRef.current = w;
       setWave(w);
@@ -180,9 +220,18 @@ export default function AudioPanel() {
     audioMediaControl(action);
   }, []);
 
+  // 播放中本地推进进度：事件驱动后 SMTC 不再每秒推送，进度条由本地 1 秒递增保持平滑
+  useEffect(() => {
+    if (!visible || !media?.playing) return;
+    const timer = window.setInterval(() => setProgressTick((t) => t + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [visible, media?.playing]);
+
+  const progressAt = mediaRef.current.at || Date.now();
+  const elapsedSecs = media?.playing ? (Date.now() - progressAt) / 1000 : 0;
   const progress =
     media && media.durationSecs > 0
-      ? Math.min(100, (media.positionSecs / media.durationSecs) * 100)
+      ? Math.min(100, ((mediaRef.current.positionSecs + elapsedSecs) / media.durationSecs) * 100)
       : 0;
 
   // 副标题：歌手 · 专辑优先；无歌手信息时显示应用名
@@ -204,11 +253,9 @@ export default function AudioPanel() {
       style={styleVars}
     >
       <div className="audio-panel-body">
-        {media?.thumbnail ? (
-          <div className="audio-panel-art">
-            <img src={media.thumbnail} alt="" draggable={false} />
-          </div>
-        ) : null}
+        <div className={`audio-panel-art${media?.thumbnail ? "" : " placeholder"}`}>
+          <img src={media?.thumbnail || appIcon} alt="" draggable={false} />
+        </div>
         <div className="audio-panel-info">
           <div className="audio-panel-title" title={media?.title || ""}>
             {media?.title || "未在播放"}
@@ -263,6 +310,37 @@ export default function AudioPanel() {
           </button>
         </div>
       </div>
+      <div className="audio-panel-volume">
+        <button
+          type="button"
+          className={`audio-vol-btn${muted ? " muted" : ""}`}
+          onClick={toggleMute}
+          title={muted ? "取消静音" : "静音"}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+            <path d="M3 9v6h4l5 4V5L7 9H3z" />
+            {muted && (
+              <path
+                d="M16 8l6 8M22 8l-6 8"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                fill="none"
+              />
+            )}
+          </svg>
+        </button>
+        <input
+          type="range"
+          className="audio-vol-slider"
+          min={0}
+          max={100}
+          step={1}
+          value={volume}
+          onChange={(e) => onVolumeChange(Number(e.target.value))}
+          title="系统音量"
+        />
+        <span className="audio-vol-text">{volume}%</span>
+      </div>
       <div className="audio-panel-progress">
         <div className="audio-panel-progress-bar" style={{ width: `${progress}%` }} />
       </div>
@@ -272,10 +350,11 @@ export default function AudioPanel() {
             key={i}
             className="audio-wave-bar"
             style={{
-              // 非线性放大：pow 提升低能量让震动更明显，底座抬到 10% 避免静止
+              // 非线性放大：pow 提升低能量让震动更明显，底座抬到 10% 避免静止；
+              // v0.20.1 系数 135→175、指数 0.75→0.7，低能量更活跃（震动幅度更大）
               height: `${Math.min(
                 100,
-                Math.max(10, Math.round(Math.pow(Math.max(0, v), 0.75) * 135)),
+                Math.max(10, Math.round(Math.pow(Math.max(0, v), 0.7) * 175)),
               )}%`,
             }}
           />

@@ -36,6 +36,10 @@ export interface AppState {
   audioPanelY: number; // 音频面板位置 Y
   audioPanelOpacity: number; // 音频面板背景不透明度（0~100，越高越不透明）
   audioPanelClickThrough: boolean; // 音频面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
+  translateEnabled: boolean; // 鼠标选取翻译开关（默认开）
+  translateEngine: string; // 翻译引擎："ai" | "microsoft"
+  translateMsRegion: string; // 微软翻译区域（Region）
+  translateHasMsKey: boolean; // 是否已配置微软翻译 Key（DPAPI 加密文件存在）
   fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
   animating: boolean;
@@ -122,4 +126,19 @@ export interface PerfSnapshot {
   gpu: GpuMetrics;
   memory: MemoryMetrics;
   network: NetworkMetrics;
+}
+
+/** 翻译弹窗：开始翻译（源文本与引擎） */
+export interface TranslatePending {
+  source: string;
+  engine: string;
+}
+
+/** 翻译弹窗：翻译结果 */
+export interface TranslateResult {
+  source: string;
+  target: string;
+  engine: string;
+  ok: boolean;
+  error: string;
 }

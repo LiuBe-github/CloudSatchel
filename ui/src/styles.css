@@ -1484,6 +1484,16 @@ button {
   -webkit-user-drag: none;
   user-select: none;
 }
+/* 空封面占位：云笈图标居中、柔化显示 */
+.audio-panel-art.placeholder {
+  background: color-mix(in srgb, var(--color-paper-deep) 40%, transparent);
+}
+.audio-panel-art.placeholder img {
+  object-fit: contain;
+  padding: 14px;
+  box-sizing: border-box;
+  opacity: 0.75;
+}
 .audio-panel-info {
   flex: 1;
   min-width: 0;
@@ -1767,4 +1777,141 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ============ 音频面板音量调节条（v0.20.0） ============ */
+.audio-panel-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 2px;
+}
+.audio-vol-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-ink-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.audio-vol-btn:hover {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-paper-deep) 70%, transparent);
+}
+.audio-vol-btn.muted {
+  color: var(--color-danger);
+}
+.audio-vol-slider {
+  flex: 1;
+  min-width: 0;
+  height: 3px;
+  accent-color: var(--audio-accent, var(--color-bamboo));
+  cursor: pointer;
+}
+.audio-vol-text {
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ============ 鼠标选取翻译（v0.20.0） ============ */
+.translate-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  line-height: 1;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-bamboo);
+  color: var(--color-paper);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.translate-button:hover {
+  background: var(--color-bamboo-light);
+}
+.translate-popup {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-paper);
+  border-radius: 14px;
+  /* 与外层窗口一致：无外阴影（透明窗口外阴影会在边缘裁出矩形虚框），仅 inset 高光 */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-paper-deep) 65%, transparent);
+  overflow: hidden;
+  font-size: 13px;
+}
+.translate-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+.translate-popup-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.translate-popup-source {
+  max-height: 56px;
+  overflow: hidden;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+  border-bottom: 1px dashed color-mix(in srgb, var(--color-ink) 12%, transparent);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.translate-popup-body {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow: auto;
+}
+.translate-popup-result {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.translate-popup-loading {
+  color: var(--color-ink-faint);
+  font-size: 12px;
+}
+.translate-popup-err {
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.translate-popup-hint {
+  color: var(--color-ink-faint);
+  font-size: 12px;
+}
+.translate-popup-copy {
+  margin-top: 10px;
+}
+.translate-popup-foot {
+  padding: 6px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+  text-align: center;
 }

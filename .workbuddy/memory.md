@@ -4,10 +4,10 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.19.0
+- 当前版本：v0.20.3
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.13）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.17）
 
 ## 已实现功能
 
@@ -27,8 +27,74 @@
 - **隐私老板键（v0.13.0）：全局热键立即触发/恢复隐私序列**
 - **AI 小窗（v0.14.0）：全局快捷键呼出小型 AI 问答窗**
 - **音频识别（v0.15.0）：右下角媒体面板，SMTC 控制 + WASAPI 波形；v0.17.0 起为主界面功能列表项（不再在设置面板）**
+- **鼠标选取翻译（v0.20.0）：选中文字松手弹「翻译」按钮，点击出翻译弹窗（AI 助理 / 微软翻译），点击外部关闭**
+- **音频面板音量调节条（v0.20.0）：面板内系统音量滑块 + 静音开关**
 
 ## 最近完成
+
+- 2026-08-29 v0.20.3 翻译按钮再缩小一半：75×30 → 38×15
+  - tauri.conf.json translate-button width/height 75×30→38×15；translate.rs
+    BUTTON_W/BUTTON_H 同步；CSS 字号 12.5→10.5、圆角 15→8、去默认 padding
+  - 版本号 v0.20.3 全链路同步
+
+- 2026-08-29 v0.20.2 翻译按钮尺寸 72×30 → 75×30（用户指定）
+  - tauri.conf.json translate-button width 72→75；translate.rs BUTTON_W 72→75
+    （按钮定位/弹窗居中换算同步）
+  - 版本号 v0.20.2 全链路同步
+
+- 2026-08-29 v0.20.1 翻译窗口虚框修复 + 翻译移入功能列表 + 波形幅度加大
+  - 虚框修复：翻译按钮/弹窗去掉 CSS 外阴影（透明窗口外阴影会在窗口边缘裁出
+    矩形虚影框，与音频面板 v0.16.2 同因），改 inset 高光；新增 lib.rs
+    prepare_aux_window（make_tool_window + install_nccalc_fix），translate.rs 在
+    show 前重刷窗口样式，防止 wry show 重置 exstyle/样式位导致首帧矩形框
+  - 翻译移入主界面功能列表（第 7 项「鼠标选取翻译」卡片，FEATURES[6]）：新增
+    TranslatePanel 详情组件（开关 + 引擎下拉 + 微软 Key/Region），SettingsPanel
+    移除「鼠标选取翻译」分组与 props（与音频识别 v0.17.0 同套路）
+  - 波形幅度：AudioPanel 高度公式 135→175、指数 0.75→0.7（低能量更活跃）
+  - 版本号 v0.20.1 全链路同步；cargo check + ui build 通过
+
+- 2026-08-29 v0.20.0 新增「鼠标选取翻译」+ 音频面板音量调节条
+  - 鼠标选取翻译（FR-19）：WH_MOUSE_LL 钩子监听左键抬起 → UI Automation
+    （IUIAutomation TextPattern，GetFocusedElement/ElementFromPoint + ControlViewWalker
+    沿祖先链找 TextPattern）读取前台窗口选中文本与选区位置 → translate-button 小窗
+    （72×30 focusable:false 竹青胶囊）出现在选区下方 → 点击 translate_open 打开
+    translate-popup（400×300 纸感卡片，focusable:true）→ 异步翻译 → translate-result 事件
+  - 关闭方式：钩子 WM_LBUTTONDOWN 点按钮/弹窗以外 → hide 两者；弹窗失焦 / Esc → hide；
+    竞态修复：worker 延迟 130ms 检测时若弹窗已显示则跳过（避免误关/重复弹按钮）
+  - 引擎：AI 助理（复用 ai.rs DPAPI Key + BaseURL/模型，非流式 chat/completions，
+    提示词「翻译成简体中文只输出译文」）；微软翻译（Azure Translator v3，
+    Key DPAPI 加密存 ms-translate-key.bin，region 持久化，Ocp-Apim-Subscription-Key/Region 头）
+  - 设置：SettingsPanel「鼠标选取翻译」分组（开关 / 引擎下拉 / 微软 Key+Region）；
+    prefs 新增 translate_enabled / translate_engine / translate_ms_region
+  - 窗口：tauri.conf.json 新增 translate-button / translate-popup（透明无边框置顶 skipTaskbar），
+    capabilities windows 列表同步；make_tool_window / poll_loop 兜底修复列表同步；
+    on_window_event 关闭=隐藏；UIA 需 windows feature Win32_UI_Accessibility
+  - 音频面板音量条：volume.rs（IAudioEndpointVolume Get/SetMasterVolumeLevelScalar +
+    Get/SetMute，独立 COM 初始化）；命令 get/set_system_volume、get/set_system_mute；
+    面板新增音量行（喇叭按钮静音/取消 + 80ms 节流滑块 + 百分比），窗口高度 132→156
+  - 版本号 v0.20.0 全链路同步；cargo check + ui build 通过
+
+- 2026-08-29 v0.19.2 音频封面修复（错图 / Edge 无封面 / 空封面占位）
+  - 错图根因：THUMB_CACHE 单槽缓存键命中即永久返回；切歌瞬间 SMTC 缩略图仍是
+    上一首（应用异步更新），首曲乱图同因（读到旧会话残留缩略图并缓存）
+  - 修复：两段式缓存「候选 → 连续两次一致 → 确认」——键变化后首次读取只作候选，
+    事件循环 400ms（THUMB_SETTLE_MS）后强制重读，一致才确认；不一致更新候选继续等；
+    空封面不确认，按 1s（THUMB_EMPTY_RETRY_MS）重读，3 次（THUMB_EMPTY_MAX_TRIES）
+    仍空才接受（浏览器封面常异步加载）
+  - Edge 无封面：read_thumbnail 新增 WebP（RIFF....WEBP）/ AVIF（ftyp avif/avis）嗅探，
+    浏览器媒体会话 artwork 常用 WebP；异步加载的空封面由空封面重试兜底
+  - 空封面占位：AudioPanel 封面区常驻，thumbnail 为空显示云笈图标
+    （复用 ui/src/assets/app-icon.png；object-fit: contain + 14px 内边距 + 柔化，
+    `.audio-panel-art.placeholder`）
+  - 版本号同步 v0.19.2（Cargo / Cargo.lock / tauri.conf / package / ui package / App /
+    About / Settings）；cargo check + cargo test + ui build 通过
+
+- 2026-08-27 v0.19.1 音频 SMTC 改为事件驱动（修 CPU 高占用）
+  - 现象：云笈 + NPSMS（Now Playing Session Manager / NPSMSvc）合计占用约 50% CPU
+  - 根因：audio.rs smtc_loop 每 1 秒创建 SMTC manager 并查询会话/属性/封面，持续唤醒 NPSMS
+  - 修复：订阅 CurrentSessionChanged / SessionsChanged / MediaPropertiesChanged / PlaybackInfoChanged / TimelinePropertiesChanged，系统有变化才读取推送；空闲完全不访问 SMTC
+  - 前端 AudioPanel 增加本地 1 秒进度推进，事件驱动下进度条仍平滑
+  - 版本号同步 v0.19.1
 
 - 2026-08-21 v0.19.0 音频面板自定义位置与透明度（设置项）
   - 需求：位置/透明度交给用户——设置面板「音频识别」分组新增**面板背景透明度**滑块（0~100，默认 75）与**鼠标穿透**开关（默认关）
@@ -264,13 +330,14 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新已发布：v0.16.15（标题框终案，https://github.com/LiuBe-github/CloudSatchel/releases/tag/v0.16.15）
-- **本地待推送**：v0.17.0（移除桌宠 + 音频识别移入功能列表，已构建待用户确认后推送）
-- git 状态：main 与远端同步至 `9a1709e`（v0.16.15）；v0.17.0 改动未提交
-- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表
+- 最新代码：v0.20.3（翻译按钮 38×15，2026-08-29，本地未提交）
+- 已发布线：v0.7.x ~ v0.16.15 历史 + v0.17.0（GitHub Releases 仅保留 v0.17.0；git tag 完整保留）
+- 本地未推送：v0.18.0 ~ v0.20.1（构建产物与安装包待用户确认后发版）
+- git 状态：main 与远端同步至 `af0cda4`（v0.19.0 README）；v0.19.1 起的全部改动未提交
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度
 
 **需求文档当前状态**
-- `CloudSatchel需求文档.md`（根目录，v1.13）：FR-01~FR-13、FR-15、FR-17、FR-18 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别为主界面功能列表项
+- `CloudSatchel需求文档.md`（根目录，v1.17）：FR-01~FR-13、FR-15、FR-17、FR-18、FR-19 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别与鼠标选取翻译均为主界面功能列表项
 - 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展
 
 **待用户验证事项**

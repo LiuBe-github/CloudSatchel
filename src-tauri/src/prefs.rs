@@ -44,6 +44,9 @@ fn default_neg_one() -> i32 {
 fn default_audio_opacity() -> u8 {
     75 // 音频面板背景不透明度（0 最透 ~ 100 不透明）
 }
+fn default_translate_engine() -> String {
+    "ai".to_string() // 翻译引擎默认：用户配置的 AI 助理
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -102,6 +105,12 @@ pub struct AppPrefs {
     pub audio_panel_opacity: u8, // 音频面板背景不透明度（0~100）
     #[serde(default)]
     pub audio_panel_click_through: bool, // 音频面板鼠标穿透（开启=仅展示，关闭=可拖动/操作）
+    #[serde(default = "default_true")]
+    pub translate_enabled: bool, // 鼠标选取翻译（v0.20.0）开关，默认开
+    #[serde(default = "default_translate_engine")]
+    pub translate_engine: String, // 翻译引擎："ai"（用户配置的 AI 助理）| "microsoft"（微软翻译）
+    #[serde(default)]
+    pub translate_ms_region: String, // 微软翻译区域（Region，如 eastasia）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -142,6 +151,9 @@ impl Default for AppPrefs {
             audio_panel_y: default_neg_one(),
             audio_panel_opacity: default_audio_opacity(),
             audio_panel_click_through: false,
+            translate_enabled: true,
+            translate_engine: default_translate_engine(),
+            translate_ms_region: String::new(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

@@ -9,6 +9,8 @@ import type {
   MediaState,
   PerfSnapshot,
   ThemeMode,
+  TranslatePending,
+  TranslateResult,
 } from "../vite-env";
 
 /** 应用是否运行在 Tauri 内（否则为浏览器预览模式） */
@@ -37,6 +39,10 @@ const FALLBACK_STATE: AppState = {
   audioPanelY: -1,
   audioPanelOpacity: 75,
   audioPanelClickThrough: false,
+  translateEnabled: true,
+  translateEngine: "ai",
+  translateMsRegion: "",
+  translateHasMsKey: false,
   fullscreenActive: false,
   theme: "system",
   animating: false,
@@ -236,6 +242,93 @@ export function onAiError(cb: (message: string) => void): () => void {
   return () => {
     void unlisten.then((fn) => fn());
   };
+}
+
+// ---------------------------------------------------------------------------
+// 鼠标选取翻译（v0.20.0）
+// ---------------------------------------------------------------------------
+
+export async function setTranslateEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ translateEnabled: enabled });
+  return (await invoke<AppState>("set_translate_enabled", { enabled })) as AppState;
+}
+
+export async function setTranslateEngine(engine: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ translateEngine: engine });
+  return (await invoke<AppState>("set_translate_engine", { engine })) as AppState;
+}
+
+export async function setTranslateMsRegion(region: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ translateMsRegion: region });
+  return (await invoke<AppState>("set_translate_ms_region", { region })) as AppState;
+}
+
+export async function saveTranslateMsKey(apiKey: string): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("save_translate_ms_key", { apiKey });
+}
+
+/** 点击翻译按钮：显示弹窗并开始翻译 */
+export function translateOpen(): void {
+  if (!inTauri()) return;
+  void invoke("translate_open");
+}
+
+/** 隐藏翻译按钮与弹窗（点击外部 / 失焦 / Esc） */
+export function translateHide(): void {
+  if (!inTauri()) return;
+  void invoke("translate_hide");
+}
+
+/** 订阅翻译开始事件 */
+export function onTranslatePending(cb: (p: TranslatePending) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<TranslatePending>("translate-pending", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 订阅翻译结果事件 */
+export function onTranslateResult(cb: (r: TranslateResult) => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen<TranslateResult>("translate-result", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 订阅翻译清除事件（隐藏时重置弹窗内容） */
+export function onTranslateCleared(cb: () => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen("translate-cleared", () => cb());
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 系统音量（FR-18 扩展：音频面板音量调节条）
+// ---------------------------------------------------------------------------
+
+export async function getSystemVolume(): Promise<number> {
+  if (!inTauri()) return 50;
+  return (await invoke<number>("get_system_volume")) ?? 50;
+}
+
+export async function setSystemVolume(level: number): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("set_system_volume", { level });
+}
+
+export async function getSystemMute(): Promise<boolean> {
+  if (!inTauri()) return false;
+  return (await invoke<boolean>("get_system_mute")) ?? false;
+}
+
+export async function setSystemMute(mute: boolean): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("set_system_mute", { mute });
 }
 
 export async function setTheme(mode: ThemeMode): Promise<AppState> {

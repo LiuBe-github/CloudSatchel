@@ -55,14 +55,6 @@ pub fn chat_url(base_url: &str) -> String {
 /// 当前进行中的对话任务（「停止生成」时 abort）
 static ABORT_HANDLE: Mutex<Option<AbortHandle>> = Mutex::new(None);
 
-fn key_path() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("CloudSatchel")
-        .join(KEY_FILE_NAME)
-}
-
 // ---------------------------------------------------------------------------
 // DPAPI 加解密
 // ---------------------------------------------------------------------------
@@ -126,22 +118,52 @@ fn dpapi_decrypt(data: &[u8]) -> Result<String, String> {
 
 /// 是否已保存 API Key（加密文件存在）
 pub fn has_key() -> bool {
-    key_path().is_file()
+    has_encrypted_key(KEY_FILE_NAME)
 }
 
 /// 清洗 API Key：去掉所有空白字符（防复制粘贴带入空格/换行破坏 Key）
-fn clean_key(api_key: &str) -> String {
+pub(crate) fn clean_key(api_key: &str) -> String {
     api_key.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// 加密保存 API Key（原子写入，磁盘无明文）
 pub fn save_key(api_key: &str) -> Result<(), String> {
+    save_encrypted_key(KEY_FILE_NAME, api_key)
+}
+
+/// 读取并解密 API Key
+pub fn load_key() -> Result<String, String> {
+    let key = load_encrypted_key(KEY_FILE_NAME)?;
+    crate::dlog::write(&format!("[ai] key loaded: len={}", key.len()));
+    Ok(key)
+}
+
+// ---------------------------------------------------------------------------
+// 通用加密 Key 存取（微软翻译 Key 等复用，与 AI Key 同级目录）
+// ---------------------------------------------------------------------------
+
+/// 加密 Key 文件路径（文件名相对 %LOCALAPPDATA%\CloudSatchel）
+pub(crate) fn encrypted_path(file_name: &str) -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("CloudSatchel")
+        .join(file_name)
+}
+
+/// 是否已保存指定加密 Key 文件
+pub(crate) fn has_encrypted_key(file_name: &str) -> bool {
+    encrypted_path(file_name).is_file()
+}
+
+/// 通用加密保存（原子写入，磁盘无明文）
+pub(crate) fn save_encrypted_key(file_name: &str, api_key: &str) -> Result<(), String> {
     let cleaned = clean_key(api_key);
     if cleaned.is_empty() {
         return Err("API Key 不能为空".to_string());
     }
     let data = dpapi_encrypt(&cleaned)?;
-    let path = key_path();
+    let path = encrypted_path(file_name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -150,12 +172,11 @@ pub fn save_key(api_key: &str) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-/// 读取并解密 API Key
-pub fn load_key() -> Result<String, String> {
-    let data = std::fs::read(key_path()).map_err(|e| format!("读取 Key 文件失败: {e}"))?;
-    let key = dpapi_decrypt(&data)?;
-    crate::dlog::write(&format!("[ai] key loaded: len={}", key.len()));
-    Ok(key)
+/// 通用加密读取
+pub(crate) fn load_encrypted_key(file_name: &str) -> Result<String, String> {
+    let data = std::fs::read(encrypted_path(file_name))
+        .map_err(|e| format!("读取 Key 文件失败: {e}"))?;
+    dpapi_decrypt(&data)
 }
 
 // ---------------------------------------------------------------------------
