@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "云笈",
-  "version": "0.20.3",
+  "version": "1.0.0",
   "identifier": "com.cloudsatchel.app",
   "build": {
     "beforeDevCommand": "",
@@ -59,8 +59,8 @@
       {
         "label": "translate-button",
         "title": "翻译",
-        "width": 38,
-        "height": 15,
+        "width": 75,
+        "height": 30,
         "decorations": false,
         "transparent": true,
         "resizable": false,

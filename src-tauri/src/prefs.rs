@@ -47,6 +47,12 @@ fn default_audio_opacity() -> u8 {
 fn default_translate_engine() -> String {
     "ai".to_string() // 翻译引擎默认：用户配置的 AI 助理
 }
+fn default_translate_target_lang() -> String {
+    "auto-zh-Hans".to_string() // 翻译目标语言默认：自动识别 → 中文（简体）
+}
+fn default_translate_source_lang() -> String {
+    "auto".to_string() // 翻译源语言默认：自动检测
+}
 fn default_fit() -> String {
     "cover".to_string()
 }
@@ -111,6 +117,10 @@ pub struct AppPrefs {
     pub translate_engine: String, // 翻译引擎："ai"（用户配置的 AI 助理）| "microsoft"（微软翻译）
     #[serde(default)]
     pub translate_ms_region: String, // 微软翻译区域（Region，如 eastasia）
+    #[serde(default = "default_translate_target_lang")]
+    pub translate_target_lang: String, // 翻译目标语言（默认 auto-zh-Hans：自动识别 → 中文简体）
+    #[serde(default = "default_translate_source_lang")]
+    pub translate_source_lang: String, // 翻译源语言（默认 auto：自动检测）
 
     // —— 背景设置（保持旧 settings.json 的顶层布局，向后兼容）——
     #[serde(default)]
@@ -154,6 +164,8 @@ impl Default for AppPrefs {
             translate_enabled: true,
             translate_engine: default_translate_engine(),
             translate_ms_region: String::new(),
+            translate_target_lang: default_translate_target_lang(),
+            translate_source_lang: default_translate_source_lang(),
             image_path: String::new(),
             fit: default_fit(),
             dim: default_dim(),

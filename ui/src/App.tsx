@@ -17,6 +17,8 @@ import {
   setTranslateEnabled,
   setTranslateEngine,
   setTranslateMsRegion,
+  setTranslateTargetLang,
+  setTranslateSourceLang,
   saveTranslateMsKey,
   setAutohideEnabled,
   setPerfIntervalMs,
@@ -140,6 +142,8 @@ function App({ initial }: AppProps) {
       translateEnabled: true,
       translateEngine: "ai",
       translateMsRegion: "",
+      translateTargetLang: "auto-zh-Hans",
+      translateSourceLang: "auto",
       translateHasMsKey: false,
       fullscreenActive: false,
       autohideEnabled: false,
@@ -384,6 +388,26 @@ function App({ initial }: AppProps) {
     setState(s);
   }, []);
 
+  const handleTranslateTargetLangChange = useCallback(async (lang: string) => {
+    try {
+      const next = await setTranslateTargetLang(lang);
+      setState(next);
+    } catch (err) {
+      console.error("更新翻译目标语言失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handleTranslateSourceLangChange = useCallback(async (lang: string) => {
+    try {
+      const next = await setTranslateSourceLang(lang);
+      setState(next);
+    } catch (err) {
+      console.error("更新翻译源语言失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
   const handleAutohideEnabled = useCallback(async (enabled: boolean) => {
     try {
       const next = await setAutohideEnabled(enabled);
@@ -564,7 +588,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v0.20.3</div>
+          <div className="sidebar-version">v1.0.0</div>
           </div>
         </aside>
 
@@ -635,6 +659,10 @@ function App({ initial }: AppProps) {
               onEngineChange={handleTranslateEngineChange}
               onRegionChange={handleTranslateMsRegionChange}
               onSaveMsKey={handleSaveTranslateMsKey}
+              targetLang={state.translateTargetLang}
+              onTargetLangChange={handleTranslateTargetLangChange}
+              sourceLang={state.translateSourceLang}
+              onSourceLangChange={handleTranslateSourceLangChange}
             />
           ) : (
             <div className="detail-card noise-bg animate-scale-in" key={feature.id}>

@@ -42,6 +42,8 @@ const FALLBACK_STATE: AppState = {
   translateEnabled: true,
   translateEngine: "ai",
   translateMsRegion: "",
+  translateTargetLang: "auto-zh-Hans",
+  translateSourceLang: "auto",
   translateHasMsKey: false,
   fullscreenActive: false,
   theme: "system",
@@ -261,6 +263,16 @@ export async function setTranslateEngine(engine: string): Promise<AppState> {
 export async function setTranslateMsRegion(region: string): Promise<AppState> {
   if (!inTauri()) return fallback({ translateMsRegion: region });
   return (await invoke<AppState>("set_translate_ms_region", { region })) as AppState;
+}
+
+export async function setTranslateTargetLang(lang: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ translateTargetLang: lang });
+  return (await invoke<AppState>("set_translate_target_lang", { lang })) as AppState;
+}
+
+export async function setTranslateSourceLang(lang: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ translateSourceLang: lang });
+  return (await invoke<AppState>("set_translate_source_lang", { lang })) as AppState;
 }
 
 export async function saveTranslateMsKey(apiKey: string): Promise<void> {

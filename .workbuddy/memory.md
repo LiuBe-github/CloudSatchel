@@ -4,10 +4,10 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v0.20.3
+- 当前版本：v1.0.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.17）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.25）
 
 ## 已实现功能
 
@@ -31,6 +31,80 @@
 - **音频面板音量调节条（v0.20.0）：面板内系统音量滑块 + 静音开关**
 
 ## 最近完成
+
+- 2026-08-30 v1.0.0 首个正式版：设置项间距修复 + 版本号正式升 1.0.0
+  - 用户反馈设置项之间元素重叠/拥挤（删除灰色说明后行距不足）：CSS 新增
+    `.setting-row + .setting-row { margin-top: 16px }`，settings-section 纵向 padding
+    16→20px，settings-label margin-bottom 10→12px
+  - 版本号全链路 0.20.11 → 1.0.0（Cargo/tauri.conf/package/ui/About/侧栏/设置页脚）
+  - 版本线至此：v0.7.x ~ v0.20.11 迭代 → v1.0.0 正式版
+
+- 2026-08-30 v0.20.11 设置面板只留大标题与控件，删除全部灰色说明（setting-row-desc）
+  - 用户明确：只留选项大字，设置项下面的灰色小子不要；删除所有 setting-row-desc、
+    隐私/AI 小窗两组底部提示、以及「纯净性」整段（纯文字无控件）；错误提示（error-text）保留
+  - 版本号 v0.20.11 全链路同步
+
+- 2026-08-30 v0.20.10 设置面板文案精简（用户要求去掉赘述）
+  - 缩短隐私/AI 小窗/音频/启动退出各 setting-row-desc；删除与控件重复的
+    「（当前 X）」提示（连带删除 formatIdle 函数）；纯净性列表去掉与开关重复的第 4 条
+    与括号赘述；修正老板键输入框 placeholder 误显示 Ctrl+Shift+Space → Ctrl+`
+  - 版本号 v0.20.10 全链路同步
+
+- 2026-08-30 v0.20.9 翻译按钮 75×30 + 按钮定位改为选区末尾正下方
+  - 用户确认 24×12 尺寸钳制修复生效后，明确要 75×30：BUTTON_W/H=75/30、
+    tauri.conf 75×30、CSS 字号 12.5px 圆角 15px 字距 2px（prepare_button 运行期强制）
+  - 定位修复：原用「选区 enclosing 元素矩形」居中定位，跨行/长段落时按钮会
+    忽远忽近；改为 selection_end()——GetBoundingRectangles（SAFEARRAY，每 4 个
+    double=left/top/width/height）取最后一个有效矩形右下角作为「末尾」锚点，
+    按钮水平居中于末尾、垂直固定 GAP=8px 下方；失败回退元素矩形右下角
+  - 新增 windows feature Win32_System_Ole（SafeArrayAccessData/GetLBound/GetUBound/Unaccess）
+  - 版本号 v0.20.9 全链路同步；cargo check 通过
+
+- 2026-08-30 v0.20.8 翻译按钮“框不变小”根因修复（重要）
+  - 用户反馈：字号在变但按钮框不变。实测（启动日志 outer_size）：tauri.conf 创建
+    极小窗口时被框架钳制——24×12/60×20 配置创建后窗口都是 170×47 物理像素
+    （约 136×37.6 逻辑像素）；而 400×300 配置完全正常（500×375 物理）。
+    说明存在创建期最小尺寸钳制，且与 config 无关（tao/wry 源码无此逻辑，疑似
+    Windows CreateWindowExW 对极小 WS_POPUP 的默认处理）。
+  - 修复：translate.rs 新增 prepare_button()——启动（start）与每次显示（show_button）
+    前调用 set_min_size(1×1) + set_size(目标物理尺寸=逻辑×scale)，运行期 set_size
+    可绕过创建期钳制；实测启动后按钮窗口=30×15 物理（24×12 逻辑）
+  - 验证方法：临时启动日志 outer_size 实测（已移除）；经验：辅助窗口尺寸若
+    config 不生效，优先尝试运行期 set_size 绕过创建期钳制
+  - 版本号 v0.20.8 全链路同步
+
+- 2026-08-30 v0.20.7 翻译按钮再缩小到 24×12（用户反馈 30×14 仍偏大）
+  - 用户反馈“调整后大小不变”：应用为 Per-Monitor V2 DPI 感知（tao dpi.rs），
+    窗口配置为逻辑像素，配置本身生效；上次 38→30 变化小且旧构建未更新易误判。
+    本次直接缩到 24×12，字号 10→9px、圆角 7→6px、字距 1→0.5px
+  - 版本号 v0.20.7 全链路同步
+
+- 2026-08-30 v0.20.6 翻译按钮缩小（38×15→30×14）+ 全屏检测改为任一窗口全屏即不透明
+  - 按钮：tauri.conf translate-button 30×14；translate.rs BUTTON_W/H；CSS 字号 10px 圆角 7px
+  - 全屏检测：fullscreen.rs 新增 any_fullscreen_now()（EnumWindows 遍历可见顶层窗口，
+    跳过桌面/任务栏/工具窗口/云笈自身，复用 ≥97% 覆盖判据）+ ANY_FULLSCREEN 静态标志；
+    poll_loop 每 320ms 更新，desired_taskbar_visual 加 !is_any_fullscreen()——
+    A 全屏中点击未全屏的 B 到前台，任务栏仍保持不透明；不影响音频面板隐藏与隐私边缘弹出
+  - 版本号 v0.20.6 全链路同步；cargo check + ui build 通过
+
+- 2026-08-30 v0.20.5 翻译源语言可选（默认自动检测）
+  - TranslatePanel 新增「源语言」下拉（默认 auto：自动检测，支持简/繁/英/日/韩/法/德/俄/西）；
+    prefs/lib.rs 持久化 translate_source_lang；AI 引擎提示词带源语言名（auto 时省略），
+    微软引擎显式指定时附 from 参数（auto 时省略，由微软自动检测）；弹窗标题显示
+    「引擎 · 源语言 → 目标语言」
+  - 版本号 v0.20.5 全链路同步；cargo check + ui build 通过
+
+- 2026-08-30 v0.20.4 翻译目标语言 + 任务栏全屏/最大化检测修复
+  - 翻译目标语言：TranslatePanel 新增「目标语言」下拉（默认 auto-zh-Hans：自动识别 →
+    中文简体，另支持简/繁/英/日/韩/法/德/俄/西）；prefs/lib.rs 持久化
+    translate_target_lang；AI 引擎提示词带目标语言名，微软引擎 to= 参数（auto→zh-Hans）；
+    弹窗标题显示「引擎 → 目标语言」
+  - 全屏检测修复：根因是单一 98% 面积比判据（最大化约 95.6% 被漏）+ 未覆盖
+    “前台第三方最大化也要恢复不透明”；修复：fullscreen.rs 阈值放宽到 97% +
+    IsWindowVisible 校验，新增 FOREGROUND_MAXIMIZED 静态标志（poll_loop 每 320ms
+    更新，第三方前台 IsZoomed）；desired_taskbar_visual 加
+    !is_foreground_maximized()；独立标志不影响音频面板隐藏/隐私边缘弹出（仍只看真全屏）
+  - 版本号 v0.20.4 全链路同步；cargo check + ui build 通过
 
 - 2026-08-29 v0.20.3 翻译按钮再缩小一半：75×30 → 38×15
   - tauri.conf.json translate-button width/height 75×30→38×15；translate.rs
@@ -330,14 +404,14 @@
 ## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新代码：v0.20.3（翻译按钮 38×15，2026-08-29，本地未提交）
+- 最新代码：v1.0.0（首个正式版：设置项间距修复，2026-08-30，本地未提交）
 - 已发布线：v0.7.x ~ v0.16.15 历史 + v0.17.0（GitHub Releases 仅保留 v0.17.0；git tag 完整保留）
 - 本地未推送：v0.18.0 ~ v0.20.1（构建产物与安装包待用户确认后发版）
 - git 状态：main 与远端同步至 `af0cda4`（v0.19.0 README）；v0.19.1 起的全部改动未提交
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度
 
 **需求文档当前状态**
-- `CloudSatchel需求文档.md`（根目录，v1.17）：FR-01~FR-13、FR-15、FR-17、FR-18、FR-19 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别与鼠标选取翻译均为主界面功能列表项
+- `CloudSatchel需求文档.md`（根目录，v1.25）：FR-01~FR-13、FR-15、FR-17、FR-18、FR-19 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别与鼠标选取翻译均为主界面功能列表项
 - 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展
 
 **待用户验证事项**

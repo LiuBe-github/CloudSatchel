@@ -5,23 +5,57 @@ interface TranslatePanelProps {
   enabled: boolean;
   engine: string;
   msRegion: string;
+  targetLang: string;
+  sourceLang: string;
   hasMsKey: boolean;
   onEnabledChange: (enabled: boolean) => Promise<void> | void;
   onEngineChange: (engine: string) => Promise<void> | void;
   onRegionChange: (region: string) => Promise<void> | void;
   onSaveMsKey: (apiKey: string) => Promise<void>;
+  onTargetLangChange: (lang: string) => Promise<void> | void;
+  onSourceLangChange: (lang: string) => Promise<void> | void;
 }
+
+const SOURCE_LANG_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "auto", label: "自动检测" },
+  { value: "zh-Hans", label: "简体中文" },
+  { value: "zh-Hant", label: "繁體中文" },
+  { value: "en", label: "英语 English" },
+  { value: "ja", label: "日语 日本語" },
+  { value: "ko", label: "韩语 한국어" },
+  { value: "fr", label: "法语 Français" },
+  { value: "de", label: "德语 Deutsch" },
+  { value: "ru", label: "俄语 Русский" },
+  { value: "es", label: "西班牙语 Español" },
+];
+
+const TARGET_LANG_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "auto-zh-Hans", label: "自动识别 → 中文（简体）" },
+  { value: "zh-Hans", label: "简体中文" },
+  { value: "zh-Hant", label: "繁體中文" },
+  { value: "en", label: "英语 English" },
+  { value: "ja", label: "日语 日本語" },
+  { value: "ko", label: "韩语 한국어" },
+  { value: "fr", label: "法语 Français" },
+  { value: "de", label: "德语 Deutsch" },
+  { value: "ru", label: "俄语 Русский" },
+  { value: "es", label: "西班牙语 Español" },
+];
 
 /** 鼠标选取翻译详情页（FR-19，v0.20.0）：开关 + 引擎 / 微软翻译配置 */
 export function TranslatePanel({
   enabled,
   engine,
   msRegion,
+  targetLang,
+  sourceLang,
   hasMsKey,
   onEnabledChange,
   onEngineChange,
   onRegionChange,
   onSaveMsKey,
+  onTargetLangChange,
+  onSourceLangChange,
 }: TranslatePanelProps) {
   const [msKeyInput, setMsKeyInput] = useState("");
   const [msKeyError, setMsKeyError] = useState("");
@@ -79,6 +113,42 @@ export function TranslatePanel({
         >
           <option value="ai">AI 助理</option>
           <option value="microsoft">微软翻译</option>
+        </select>
+      </div>
+      <div className="setting-row">
+        <div className="setting-row-text">
+          <div className="setting-row-title">源语言</div>
+          <div className="setting-row-desc">默认自动检测原文语言</div>
+        </div>
+        <select
+          className="select-box"
+          value={sourceLang}
+          onChange={(e) => void onSourceLangChange(e.target.value)}
+          disabled={!enabled}
+        >
+          {SOURCE_LANG_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="setting-row">
+        <div className="setting-row-text">
+          <div className="setting-row-title">目标语言</div>
+          <div className="setting-row-desc">默认自动识别源语言并翻译为简体中文</div>
+        </div>
+        <select
+          className="select-box"
+          value={targetLang}
+          onChange={(e) => void onTargetLangChange(e.target.value)}
+          disabled={!enabled}
+        >
+          {TARGET_LANG_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
         </select>
       </div>
       {engine === "microsoft" && (

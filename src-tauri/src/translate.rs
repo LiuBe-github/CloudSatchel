@@ -21,8 +21,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::Ole::{
+    SafeArrayAccessData, SafeArrayGetLBound, SafeArrayGetUBound, SafeArrayUnaccessData,
+};
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationTextRange,
+    UIA_TextPatternId,
 };
 use windows_sys::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -40,8 +44,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::dlog;
 
 /// 翻译按钮尺寸（与 tauri.conf.json translate-button 窗口一致）
-const BUTTON_W: i32 = 38;
-const BUTTON_H: i32 = 15;
+const BUTTON_W: i32 = 75;
+const BUTTON_H: i32 = 30;
 /// 翻译弹窗尺寸（与 tauri.conf.json translate-popup 窗口一致）
 const POPUP_W: i32 = 400;
 const POPUP_H: i32 = 300;
@@ -83,6 +87,8 @@ pub struct TranslateConfig {
     pub ai_model: String,
     pub ai_base_url: String,
     pub ms_region: String,
+    pub target_lang: String, // 目标语言代码（默认 auto-zh-Hans）
+    pub source_lang: String, // 源语言代码（默认 auto：自动检测）
 }
 
 // ---------------------------------------------------------------------------
@@ -91,13 +97,17 @@ pub struct TranslateConfig {
 
 /// 启动翻译钩子与选区检测线程（幂等）
 pub fn start(app: AppHandle) {
-    let _ = APP.set(app);
+    let _ = APP.set(app.clone());
     if RUNNING.load(Ordering::SeqCst) {
         return;
     }
     let (tx, rx) = mpsc::channel::<HookMsg>();
     *TX.lock().unwrap() = Some(tx);
     RUNNING.store(true, Ordering::SeqCst);
+    // 启动即把按钮窗口压到目标尺寸（tauri.conf 创建极小窗口会被钳制）
+    if let Some(win) = app.get_webview_window("translate-button") {
+        prepare_button(&win);
+    }
     let hook_handle = std::thread::spawn(|| hook_thread());
     let worker_handle = std::thread::spawn(move || worker_thread(rx));
     std::mem::forget(hook_handle);
@@ -221,6 +231,7 @@ fn worker_thread(rx: mpsc::Receiver<HookMsg>) {
                     *SELECTION.lock().unwrap() = Some(sel.clone());
                     if let Some(win) = app.get_webview_window("translate-button") {
                         let _ = win.set_position(tauri::PhysicalPosition::new(sel.x, sel.y));
+                        prepare_button(&win);
                         crate::prepare_aux_window(&win);
                         let _ = win.show();
                     }
@@ -280,7 +291,7 @@ fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> 
     }
     let text: String = text.chars().take(MAX_TEXT).collect();
 
-    // 选区矩形：优先用选区所在元素，失败退回焦点元素矩形
+    // 选区矩形：优先用选区所在元素，失败退回焦点元素矩形（仅作回退锚点）
     let rect = unsafe { r.GetEnclosingElement() }
         .ok()
         .and_then(|e| unsafe { e.CurrentBoundingRectangle() }.ok())
@@ -289,13 +300,14 @@ fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> 
         return None;
     }
 
-    // 按钮放选区正下方居中，clamp 进所在显示器工作区
+    // 按钮放在选区「末尾」正下方：以最后一个包围矩形的右下角为锚点，
+    // clamp 进所在显示器工作区（固定 GAP 间距，不再忽远忽近）
+    let (end_x, end_y) = selection_end(&r, &rect);
     let work = work_area(pt.x, pt.y);
-    let cx = rect.left + (rect.right - rect.left) / 2;
-    let x = (cx - BUTTON_W / 2).clamp(work.left, work.right - BUTTON_W);
-    let y = (rect.bottom + GAP).clamp(work.top, work.bottom - BUTTON_H);
+    let x = (end_x - BUTTON_W / 2).clamp(work.left, work.right - BUTTON_W);
+    let y = (end_y + GAP).clamp(work.top, work.bottom - BUTTON_H);
     dlog::write(&format!(
-        "[translate] selection len={} btn=({x},{y}) rect=[{},{} {} {}]",
+        "[translate] selection len={} btn=({x},{y}) end=({end_x},{end_y}) rect=[{},{} {} {}]",
         text.len(),
         rect.left,
         rect.top,
@@ -303,6 +315,44 @@ fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> 
         rect.bottom
     ));
     Some(Selection { text, x, y })
+}
+
+/// 选区「末尾」坐标：取选区各包围矩形中的最后一个（文本结束处）右下角。
+/// 优先用 TextRange::GetBoundingRectangles（SAFEARRAY，每 4 个 double =
+/// left/top/width/height）；失败或全部退化时回退到元素矩形右下角。
+/// 之前用「整段元素矩形」居中定位，跨行/长段选区会导致按钮离文本末尾忽远忽近。
+fn selection_end(
+    range: &IUIAutomationTextRange,
+    fallback: &windows::Win32::Foundation::RECT,
+) -> (i32, i32) {
+    unsafe {
+        if let Ok(sa) = range.GetBoundingRectangles() {
+            if !sa.is_null() {
+                let lb = SafeArrayGetLBound(sa, 1).unwrap_or(0);
+                let ub = SafeArrayGetUBound(sa, 1).unwrap_or(-1);
+                let count = ((ub - lb + 1).max(0) as usize).min(4096);
+                if count >= 4 {
+                    let mut data: *mut core::ffi::c_void = std::ptr::null_mut();
+                    if SafeArrayAccessData(sa, &mut data).is_ok() && !data.is_null() {
+                        let vals = std::slice::from_raw_parts(data as *const f64, count);
+                        let n_rects = count / 4;
+                        for i in (0..n_rects).rev() {
+                            let left = vals[i * 4] as i32;
+                            let top = vals[i * 4 + 1] as i32;
+                            let width = vals[i * 4 + 2] as i32;
+                            let height = vals[i * 4 + 3] as i32;
+                            if width > 0 && height > 0 {
+                                let _ = SafeArrayUnaccessData(sa);
+                                return (left + width, top + height);
+                            }
+                        }
+                        let _ = SafeArrayUnaccessData(sa);
+                    }
+                }
+            }
+        }
+    }
+    (fallback.right, fallback.bottom)
 }
 
 /// 点击坐标所在显示器的工作区（取不到时回退 1080p 全屏）
@@ -424,11 +474,13 @@ pub fn open_popup(app: AppHandle, cfg: TranslateConfig) {
     } else {
         "AI 助理".to_string()
     };
+    let target_label = target_lang_label(&cfg.target_lang).to_string();
+    let source_label = source_lang_label(&cfg.source_lang).to_string();
     let text = sel.text.clone();
     let _ = app.emit_to(
         "translate-popup",
         "translate-pending",
-        json!({ "source": &text, "engine": engine_label }),
+        json!({ "source": &text, "engine": engine_label, "sourceLabel": source_label, "targetLabel": target_label }),
     );
 
     let app2 = app.clone();
@@ -439,6 +491,8 @@ pub fn open_popup(app: AppHandle, cfg: TranslateConfig) {
                 "source": &text,
                 "target": target,
                 "engine": engine_label,
+                "sourceLabel": source_label,
+                "targetLabel": target_label,
                 "ok": true,
                 "error": "",
             }),
@@ -446,12 +500,25 @@ pub fn open_popup(app: AppHandle, cfg: TranslateConfig) {
                 "source": &text,
                 "target": "",
                 "engine": engine_label,
+                "sourceLabel": source_label,
+                "targetLabel": target_label,
                 "ok": false,
                 "error": e,
             }),
         };
         let _ = app2.emit_to("translate-popup", "translate-result", payload);
     });
+}
+
+/// 强制按钮窗口为目标尺寸：tauri.conf 创建极小窗口时会被框架钳制
+/// （实测 24×12 配置创建后仍约 136×37 逻辑像素），运行期 set_size 可绕过；
+/// 每次显示前重设，防止 wry show 重置尺寸。
+fn prepare_button(win: &tauri::WebviewWindow) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let w = (BUTTON_W as f64 * scale).round() as u32;
+    let h = (BUTTON_H as f64 * scale).round() as u32;
+    let _ = win.set_min_size(Some(tauri::PhysicalSize::new(1, 1)));
+    let _ = win.set_size(tauri::PhysicalSize::new(w, h));
 }
 
 /// 隐藏翻译按钮与弹窗并清空选区（点击外部 / 失焦 / Esc）
@@ -477,11 +544,21 @@ async fn translate_text(text: &str, cfg: &TranslateConfig) -> Result<String, Str
 /// AI 助理引擎：OpenAI 兼容 chat/completions（非流式），提示词要求输出简体中文译文
 async fn translate_ai(text: &str, cfg: &TranslateConfig) -> Result<String, String> {
     let key = crate::ai::load_key()?;
-    let prompt = format!(
-        "把下面的文本翻译成简体中文。只输出译文本身，不要任何解释或额外内容。
+    let lang_label = target_lang_label(&cfg.target_lang);
+    let src_label = source_lang_label(&cfg.source_lang);
+    let prompt = if cfg.source_lang == "auto" {
+        format!(
+            "把下面的文本翻译成{lang_label}。只输出译文本身，不要任何解释或额外内容。
 
 {text}"
-    );
+        )
+    } else {
+        format!(
+            "把下面的{src_label}文本翻译成{lang_label}。只输出译文本身，不要任何解释或额外内容。
+
+{text}"
+        )
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
         .build()
@@ -535,8 +612,21 @@ async fn translate_ms(text: &str, cfg: &TranslateConfig) -> Result<String, Strin
         .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+    // 目标语言：默认「自动识别 → 简体中文」；显式语言直接走 BCP-47 代码
+    let to = if cfg.target_lang == "auto-zh-Hans" {
+        "zh-Hans"
+    } else {
+        cfg.target_lang.as_str()
+    };
+    let mut url = format!(
+        "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to={to}"
+    );
+    // 源语言：默认自动检测（省略 from），显式指定时附带 from 参数
+    if cfg.source_lang != "auto" {
+        url.push_str(&format!("&from={}", cfg.source_lang));
+    }
     let mut req = client
-        .post("https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hans")
+        .post(&url)
         .header("Ocp-Apim-Subscription-Key", &key)
         .json(&json!([{ "text": text }]));
     if !cfg.ms_region.is_empty() {
@@ -561,6 +651,38 @@ async fn translate_ms(text: &str, cfg: &TranslateConfig) -> Result<String, Strin
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "微软翻译未返回译文（请检查 Key 与区域配置）".to_string())
+}
+
+/// 源语言代码 → 中文名（"auto" = 自动检测）
+fn source_lang_label(code: &str) -> &'static str {
+    match code {
+        "zh-Hans" => "简体中文",
+        "zh-Hant" => "繁體中文",
+        "en" => "英语",
+        "ja" => "日语",
+        "ko" => "韩语",
+        "fr" => "法语",
+        "de" => "德语",
+        "ru" => "俄语",
+        "es" => "西班牙语",
+        _ => "自动检测",
+    }
+}
+
+/// 目标语言代码 → 中文名（AI 提示词 / 弹窗标题展示用）
+fn target_lang_label(code: &str) -> &'static str {
+    match code {
+        "zh-Hans" | "auto-zh-Hans" => "简体中文",
+        "zh-Hant" => "繁體中文",
+        "en" => "英语",
+        "ja" => "日语",
+        "ko" => "韩语",
+        "fr" => "法语",
+        "de" => "德语",
+        "ru" => "俄语",
+        "es" => "西班牙语",
+        _ => "简体中文",
+    }
 }
 
 fn friendly_net_error(e: reqwest::Error) -> String {

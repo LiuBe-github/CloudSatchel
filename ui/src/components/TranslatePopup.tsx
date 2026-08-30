@@ -11,6 +11,8 @@ import { useThemeInit } from "../lib/theme";
 interface PopupState {
   source: string;
   engine: string;
+  sourceLabel: string;
+  targetLabel: string;
   target: string;
   ok: boolean;
   error: string;
@@ -20,6 +22,8 @@ interface PopupState {
 const IDLE: PopupState = {
   source: "",
   engine: "",
+  sourceLabel: "",
+  targetLabel: "",
   target: "",
   ok: true,
   error: "",
@@ -41,6 +45,8 @@ export default function TranslatePopup() {
       setData({
         source: p.source,
         engine: p.engine,
+        sourceLabel: p.sourceLabel,
+        targetLabel: p.targetLabel,
         target: "",
         ok: true,
         error: "",
@@ -51,6 +57,8 @@ export default function TranslatePopup() {
       setData({
         source: r.source,
         engine: r.engine,
+        sourceLabel: r.sourceLabel,
+        targetLabel: r.targetLabel,
         target: r.target,
         ok: r.ok,
         error: r.error,
@@ -89,6 +97,8 @@ export default function TranslatePopup() {
       <div className="translate-popup-head">
         <span className="translate-popup-title">
           翻译{data.engine ? ` · ${data.engine}` : ""}
+          {data.sourceLabel ? ` · ${data.sourceLabel}` : ""}
+          {data.targetLabel ? ` → ${data.targetLabel}` : ""}
         </span>
         <button
           type="button"

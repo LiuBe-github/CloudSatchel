@@ -56,9 +56,6 @@ const PRIVACY_IDLE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 600, label: "10 分钟" },
 ];
 
-/** 空闲时间显示：<60 秒显示「X 秒」，否则显示「X 分钟」 */
-const formatIdle = (v: number): string =>
-  v < 60 ? `${v} 秒` : `${Math.round(v / 60)} 分钟`;
 
 export function SettingsPanel({
   open,
@@ -260,7 +257,7 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">触发空闲时间</div>
-              <div className="setting-row-desc">空闲超过该时长自动执行隐私保护（当前 {formatIdle(privacyIdleSecs)}）</div>
+
             </div>
             <select
               className="select-box"
@@ -277,9 +274,7 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">隐私老板键</div>
-              <div className="setting-row-desc">
-                按下立即触发隐私保护（无需等待空闲），再按恢复；老板键触发后鼠标/键盘操作不会恢复（默认 Ctrl+`）
-              </div>
+
             </div>
             <div className="hotkey-editor">
               <input
@@ -295,7 +290,7 @@ export function SettingsPanel({
                     void saveBossKey();
                   }
                 }}
-                placeholder="Ctrl+Shift+Space"
+                placeholder="Ctrl+`"
                 spellCheck={false}
               />
               <button
@@ -314,9 +309,7 @@ export function SettingsPanel({
               老板键注册失败（可能被其他程序占用），已降级为仅空闲触发
             </div>
           )}
-          <div className="setting-row-desc" style={{ marginTop: 8 }}>
-            空闲超时自动最小化所有窗口、隐藏桌面图标与任务栏并静音；操作鼠标或键盘立即还原
-          </div>
+
         </div>
 
         <div className="settings-section">
@@ -324,7 +317,7 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">启用 AI 小窗</div>
-              <div className="setting-row-desc">开启后可用快捷键随时呼出小型 AI 问答窗；关闭后快捷键失效且不影响主界面 AI 助手</div>
+
             </div>
             <Switch
               checked={aiPopupEnabled}
@@ -334,7 +327,7 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">呼出快捷键</div>
-              <div className="setting-row-desc">按下切换呼出 / 隐藏小窗（默认 Ctrl+Shift+Space）</div>
+
             </div>
             <div className="hotkey-editor">
               <input
@@ -370,9 +363,7 @@ export function SettingsPanel({
               AI 小窗快捷键注册失败（可能被其他程序占用），已降级为不可呼出
             </div>
           )}
-          <div className="setting-row-desc" style={{ marginTop: 8 }}>
-            小窗对话复用主界面 AI 助手的 Key / 模型配置；关闭小窗即清空对话，不落盘
-          </div>
+
         </div>
 
         <div className="settings-section">
@@ -389,9 +380,7 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">鼠标穿透</div>
-              <div className="setting-row-desc">
-                开启后音频面板不响应鼠标（仅展示，可点击其下方的窗口）；关闭后可操作（点击控制播放）
-              </div>
+
             </div>
             <Switch checked={audioPanelClickThrough} onChange={() => onAudioClickThroughChange(!audioPanelClickThrough)} />
           </div>
@@ -402,31 +391,21 @@ export function SettingsPanel({
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">开机自启动</div>
-              <div className="setting-row-desc">登录 Windows 后自动启动本应用（启动文件夹快捷方式，不写注册表）</div>
+
             </div>
             <Switch checked={autostart} onChange={() => onAutostartChange(!autostart)} />
           </div>
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">关闭到托盘</div>
-              <div className="setting-row-desc">点击关闭窗口时最小化到系统托盘继续后台运行；关闭后点击关闭直接退出软件</div>
+
             </div>
             <Switch checked={closeToTray} onChange={() => onCloseToTrayChange(!closeToTray)} />
           </div>
         </div>
 
-        <div className="settings-section">
-          <div className="settings-label">纯净性</div>
-          <ul className="purity-list">
-            <li><span className="purity-check">✓</span>纯本地运行，不联网</li>
-            <li><span className="purity-check">✓</span>不写注册表（自启动仅用启动文件夹快捷方式）</li>
-            <li><span className="purity-check">✓</span>退出时自动恢复桌面图标</li>
-            <li><span className="purity-check">✓</span>后台驻留由「关闭到托盘」开关控制（默认开）；开机自启动默认关闭</li>
-          </ul>
-        </div>
-
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v0.20.3</span>
+          <span className="settings-version">云笈 · v1.0.0</span>
         </div>
       </div>
     </div>

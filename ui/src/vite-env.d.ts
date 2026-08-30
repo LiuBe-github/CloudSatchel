@@ -39,6 +39,8 @@ export interface AppState {
   translateEnabled: boolean; // 鼠标选取翻译开关（默认开）
   translateEngine: string; // 翻译引擎："ai" | "microsoft"
   translateMsRegion: string; // 微软翻译区域（Region）
+  translateTargetLang: string; // 翻译目标语言（默认 auto-zh-Hans：自动识别 → 简体中文）
+  translateSourceLang: string; // 翻译源语言（默认 auto：自动检测）
   translateHasMsKey: boolean; // 是否已配置微软翻译 Key（DPAPI 加密文件存在）
   fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
@@ -132,6 +134,8 @@ export interface PerfSnapshot {
 export interface TranslatePending {
   source: string;
   engine: string;
+  sourceLabel: string;
+  targetLabel: string;
 }
 
 /** 翻译弹窗：翻译结果 */
@@ -139,6 +143,8 @@ export interface TranslateResult {
   source: string;
   target: string;
   engine: string;
+  sourceLabel: string;
+  targetLabel: string;
   ok: boolean;
   error: string;
 }

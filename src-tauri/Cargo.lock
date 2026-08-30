@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-satchel"
-version = "0.20.3"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

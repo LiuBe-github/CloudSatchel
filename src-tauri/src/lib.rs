@@ -70,6 +70,8 @@ pub(crate) struct AppState {
     translate_enabled: Mutex<bool>,      // 鼠标选取翻译（v0.20.0）开关（默认开）
     translate_engine: Mutex<String>,     // 翻译引擎："ai" | "microsoft"
     translate_ms_region: Mutex<String>,  // 微软翻译区域（Region）
+    translate_target_lang: Mutex<String>, // 翻译目标语言（默认 auto-zh-Hans）
+    translate_source_lang: Mutex<String>, // 翻译源语言（默认 auto：自动检测）
 }
 
 impl Default for AppState {
@@ -107,6 +109,8 @@ impl Default for AppState {
             translate_enabled: Mutex::new(true),
             translate_engine: Mutex::new("ai".to_string()),
             translate_ms_region: Mutex::new(String::new()),
+            translate_target_lang: Mutex::new("auto-zh-Hans".to_string()),
+            translate_source_lang: Mutex::new("auto".to_string()),
         }
     }
 }
@@ -143,6 +147,8 @@ struct Snapshot {
     translate_enabled: bool,
     translate_engine: String,
     translate_ms_region: String,
+    translate_target_lang: String,
+    translate_source_lang: String,
     translate_has_ms_key: bool,
     background_image_path: String,
     background_fit: String,
@@ -185,6 +191,8 @@ fn snapshot(state: &AppState) -> Snapshot {
         translate_enabled: *state.translate_enabled.lock().unwrap(),
         translate_engine: state.translate_engine.lock().unwrap().clone(),
         translate_ms_region: state.translate_ms_region.lock().unwrap().clone(),
+        translate_target_lang: state.translate_target_lang.lock().unwrap().clone(),
+        translate_source_lang: state.translate_source_lang.lock().unwrap().clone(),
         translate_has_ms_key: ai::has_encrypted_key(translate::MS_KEY_FILE),
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
@@ -225,6 +233,8 @@ fn persist(state: &AppState) {
         translate_enabled: *state.translate_enabled.lock().unwrap(),
         translate_engine: state.translate_engine.lock().unwrap().clone(),
         translate_ms_region: state.translate_ms_region.lock().unwrap().clone(),
+        translate_target_lang: state.translate_target_lang.lock().unwrap().clone(),
+        translate_source_lang: state.translate_source_lang.lock().unwrap().clone(),
         image_path: bg.image_path.clone(),
         fit: bg.fit.clone(),
         dim: bg.dim,
@@ -248,9 +258,12 @@ fn persist(state: &AppState) {
 /// 串行化任务栏视觉切换：用户开关与全屏切换可能同时触发，避免 stop/start 竞态
 static TASKBAR_LOCK: Mutex<()> = Mutex::new(());
 
-/// 任务栏“应当”呈现的视觉状态 = 用户开启透明 && 当前无全屏应用
+/// 任务栏“应当”呈现的视觉状态 = 用户开启透明 && 当前无全屏应用 && 前台窗口未最大化
 fn desired_taskbar_visual(state: &std::sync::Arc<AppState>) -> bool {
-    *state.taskbar_transparent.lock().unwrap() && !*state.fullscreen_active.lock().unwrap()
+    *state.taskbar_transparent.lock().unwrap()
+        && !*state.fullscreen_active.lock().unwrap()
+        && !fullscreen::is_foreground_maximized()
+        && !fullscreen::is_any_fullscreen()
 }
 
 /// 把任务栏同步到目标视觉状态（幂等，异步执行避免阻塞主线程）
@@ -649,6 +662,34 @@ fn set_translate_ms_region(
     snap
 }
 
+/// 设置翻译目标语言（默认 "auto-zh-Hans"：自动识别 → 中文简体）
+#[tauri::command]
+fn set_translate_target_lang(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    lang: String,
+) -> Snapshot {
+    *state.translate_target_lang.lock().unwrap() = lang;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置翻译源语言（默认 "auto"：自动检测）
+#[tauri::command]
+fn set_translate_source_lang(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    lang: String,
+) -> Snapshot {
+    *state.translate_source_lang.lock().unwrap() = lang;
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
 /// 保存微软翻译 API Key（DPAPI 加密落盘，与 AI Key 同级）
 #[tauri::command]
 fn save_translate_ms_key(api_key: String) -> Result<(), String> {
@@ -663,6 +704,8 @@ fn translate_open(app: AppHandle, state: State<std::sync::Arc<AppState>>) {
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         ms_region: state.translate_ms_region.lock().unwrap().clone(),
+        target_lang: state.translate_target_lang.lock().unwrap().clone(),
+        source_lang: state.translate_source_lang.lock().unwrap().clone(),
     };
     translate::open_popup(app, cfg);
 }
@@ -1389,13 +1432,26 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
             } else {
                 fullscreen::is_fullscreen_now()
             };
+            // 前台第三方窗口最大化：同样暂停任务栏透明（用户需求：全屏或最大化均恢复不透明）；
+            // 独立标志，不影响音频面板隐藏与隐私边缘弹出（那些仍只看真全屏）。
+            let fg_maximized = fg != 0 && fg != own && fullscreen::is_zoomed(fg);
+            let prev_fg_maximized = fullscreen::is_foreground_maximized();
+            fullscreen::set_foreground_maximized(fg_maximized);
+            // 只要存在任意全屏窗口（无论是否前台）：如 A 全屏中点击未全屏的 B 到前台，
+            // 任务栏仍保持不透明。
+            let any_fullscreen = fullscreen::any_fullscreen_now();
+            let prev_any_fullscreen = fullscreen::is_any_fullscreen();
+            fullscreen::set_any_fullscreen(any_fullscreen);
             let mut cur = state.fullscreen_active.lock().unwrap();
-            if *cur != fullscreen {
-                *cur = fullscreen;
-                drop(cur);
+            let fs_changed = *cur != fullscreen;
+            *cur = fullscreen;
+            drop(cur);
+            if fs_changed || prev_fg_maximized != fg_maximized || prev_any_fullscreen != any_fullscreen {
                 dlog::write(&format!(
-                    "[poll_loop] fullscreen changed -> {}",
-                    fullscreen
+                    "[poll_loop] fullscreen changed -> {} (fg_maximized={}, any_fullscreen={})",
+                    fullscreen,
+                    fg_maximized,
+                    any_fullscreen
                 ));
                 sync_taskbar(&app, &state);
             }
@@ -1440,6 +1496,8 @@ pub fn run() {
     *state.translate_enabled.lock().unwrap() = prefs.translate_enabled;
     *state.translate_engine.lock().unwrap() = prefs.translate_engine.clone();
     *state.translate_ms_region.lock().unwrap() = prefs.translate_ms_region.clone();
+    *state.translate_target_lang.lock().unwrap() = prefs.translate_target_lang.clone();
+    *state.translate_source_lang.lock().unwrap() = prefs.translate_source_lang.clone();
     *state.background.lock().unwrap() = prefs.background();
     // 以启动文件夹快捷方式的实际存在情况初始化自启动状态
     *state.autostart.lock().unwrap() = autostart::is_enabled();
@@ -1477,6 +1535,8 @@ pub fn run() {
             set_translate_enabled,
             set_translate_engine,
             set_translate_ms_region,
+            set_translate_target_lang,
+            set_translate_source_lang,
             save_translate_ms_key,
             translate_open,
             translate_hide,
