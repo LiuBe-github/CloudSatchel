@@ -82,7 +82,7 @@ export function TranslatePanel({
   };
 
   return (
-    <div className="detail-card noise-bg animate-scale-in">
+    <div className="detail-card noise-bg">
       <div className="detail-hero">
         <div className="detail-icon">译</div>
         <div className="detail-titles">

@@ -30,6 +30,16 @@
   /* 与 Windows 11 默认窗口的 DWM 圆角半径一致（8px），
      避免原生边框圆角与内容圆角错位形成“虚框” */
   --window-radius: 8px;
+
+  /* ---------- 动效令牌（参照 Apple HIG Motion：克制、有目的、自然） ---------- */
+  /* 标准缓出：快速进入、平稳落地（HIG 建议的 ease-out） */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 轻弹簧：仅用于按压回弹与切换等小型反馈 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* 时长层级：快（悬停/按压）· 中（组件切换）· 慢（面板/页面级） */
+  --dur-fast: 0.16s;
+  --dur-med: 0.3s;
+  --dur-slow: 0.45s;
 }
 
 :root[data-theme="dark"] {
@@ -102,6 +112,42 @@ button {
   outline: none;
 }
 
+/* ---------- 全局微交互（HIG：即时、微妙的反馈） ---------- */
+/* 按压回弹：所有可点按钮轻压 3%（窗口按钮除外，保持 Windows 原生手感） */
+button:active:not(:disabled):not(.win-btn) {
+  transform: scale(0.97);
+}
+button {
+  transition-property: background-color, color, border-color, box-shadow, opacity, filter;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: ease;
+}
+/* 键盘可达性：清晰焦点环 */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-bamboo) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* 输入类控件聚焦：边框强调 + 柔和光晕 */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--color-bamboo) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-bamboo) 16%, transparent);
+}
+
+/* 尊重系统「减弱动态效果」设置（HIG：动效必须可关闭） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* 窗口外壳：透明 + 圆角（由 webview 窗口提供圆角裁剪） */
 .app-shell {
   width: 100%;
@@ -110,7 +156,12 @@ button {
   flex-direction: column;
   position: relative;
   border-radius: var(--window-radius);
-  background: var(--color-paper);
+  /* 无背景图时给纸面一点自上而下的微渐变，增加纵深（HIG depth） */
+  background: linear-gradient(
+    180deg,
+    var(--color-paper) 0%,
+    color-mix(in srgb, var(--color-paper-warm) 42%, var(--color-paper)) 100%
+  );
   overflow: hidden;
   box-shadow: 0 0 0 1px var(--color-paper-deep) inset;
 }
@@ -152,19 +203,25 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0;
+  border-radius: 6px;
   color: var(--color-ink-faint);
   transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 .win-btn:hover {
   background: var(--color-paper-deep);
   color: var(--color-ink);
 }
+.win-btn:active {
+  background: color-mix(in srgb, var(--color-paper-deep) 70%, var(--color-ink-ghost));
+}
 .win-btn.win-close:hover {
   background: #e81123;
   color: #ffffff;
+}
+.win-btn.win-close:active {
+  background: #c50f1f;
 }
 
 .titlebar-title {
@@ -206,12 +263,16 @@ button {
   border-radius: 8px;
   color: var(--color-ink-faint);
   transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 .icon-btn:hover {
   background: var(--color-paper-deep);
   color: var(--color-ink);
+}
+.icon-btn:active {
+  transform: scale(0.92);
 }
 .icon-btn.active {
   background: var(--color-bamboo-mist);
@@ -284,22 +345,57 @@ button {
   font-size: 13px;
   text-align: left;
   transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+    background-color 0.22s var(--ease-out),
+    color 0.22s ease,
+    box-shadow 0.22s var(--ease-out),
+    transform 0.18s var(--ease-out);
 }
 .feature-item:hover {
   background: var(--color-paper-deep);
   color: var(--color-ink);
+  transform: translateX(2px);
+}
+.feature-item:active {
+  transform: translateX(2px) scale(0.97);
 }
 .feature-item.active {
   background: var(--color-bamboo);
   color: #f6f3ec;
-  box-shadow: 0 2px 8px var(--color-shadow);
+  box-shadow: 0 4px 14px var(--color-shadow);
+  transform: none;
+}
+/* 激活项左侧强调条（HIG：用颜色+层次标记当前选择） */
+.feature-item.active::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.feature-item.active .feature-icon {
+  animation: icon-pop 0.4s var(--ease-spring);
+}
+
+@keyframes icon-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .feature-icon {
   font-size: 15px;
   line-height: 1;
+  display: inline-block;
 }
 
 .feature-name {
@@ -340,6 +436,26 @@ button {
   min-height: 0;
 }
 
+/* 详情内容容器：切换功能时整块淡入 + 轻位移（keyed remount 触发） */
+.detail-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: card-in var(--dur-slow) var(--ease-out) both;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .detail-card {
   flex: 1;
   display: flex;
@@ -351,7 +467,9 @@ button {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-paper-deep);
-  box-shadow: 0 2px 14px var(--color-shadow);
+  box-shadow:
+    0 2px 14px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 55%, transparent);
 }
 
 .detail-hero {
@@ -369,8 +487,15 @@ button {
   justify-content: center;
   font-size: 26px;
   border-radius: 16px;
-  background: var(--color-bamboo-mist);
+  background: linear-gradient(
+    160deg,
+    var(--color-bamboo-mist),
+    color-mix(in srgb, var(--color-bamboo-glow) 72%, var(--color-bamboo-mist))
+  );
   color: var(--color-bamboo);
+  box-shadow:
+    0 3px 10px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 60%, transparent);
 }
 
 .detail-titles {
@@ -414,15 +539,35 @@ button {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  transition: background-color 0.3s ease;
+  position: relative;
+  transition:
+    background-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 .state-dot.on {
   background: var(--color-bamboo);
   box-shadow: 0 0 0 3px var(--color-bamboo-mist);
 }
+.state-dot.on::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  animation: state-pulse 2.6s ease-out infinite;
+}
 .state-dot.off {
   background: var(--color-ink-ghost);
   box-shadow: 0 0 0 3px var(--color-paper-deep);
+}
+
+@keyframes state-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-bamboo) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 9px transparent;
+  }
 }
 
 .state-label {
@@ -481,17 +626,24 @@ button {
   color: var(--color-ink-soft);
   text-align: left;
   transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+    background-color 0.2s var(--ease-out),
+    color 0.2s ease,
+    box-shadow 0.2s var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .perf-nav-item:hover {
   background: var(--color-paper-deep);
   color: var(--color-ink);
 }
+.perf-nav-item:active {
+  transform: scale(0.96);
+}
 .perf-nav-item.active {
   background: var(--color-bamboo);
   color: #f6f3ec;
-  box-shadow: 0 2px 8px var(--color-shadow);
+  box-shadow:
+    0 2px 8px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 24%, transparent);
 }
 
 .perf-nav-icon {
@@ -676,20 +828,34 @@ button {
   height: 31px;
   border-radius: 999px;
   padding: 0;
-  transition: background-color 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    background-color 0.25s var(--ease-out),
+    box-shadow 0.25s var(--ease-out),
+    transform 0.16s var(--ease-spring);
   flex-shrink: 0;
 }
+.switch:active:not(:disabled) {
+  transform: scale(0.94);
+}
 .switch:disabled {
-  opacity: 0.7;
+  opacity: 0.55;
+  cursor: default;
 }
 
 .switch.off {
+  --thumb-x: 0px;
   background: var(--color-paper-deep);
   box-shadow: inset 0 0 0 1px var(--color-ink-ghost);
 }
+.switch.off:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--color-ink-faint);
+}
 .switch.on {
+  --thumb-x: 21px;
   background: var(--color-bamboo);
-  box-shadow: 0 2px 8px var(--color-shadow);
+  box-shadow:
+    0 2px 8px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 22%, transparent);
 }
 
 .switch-thumb {
@@ -701,10 +867,12 @@ button {
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateX(var(--thumb-x, 0px));
+  transition: transform 0.25s var(--ease-spring);
 }
-.switch.on .switch-thumb {
-  transform: translateX(21px);
+/* 按压时滑块拉长（拟物弹簧手感） */
+.switch:active:not(:disabled) .switch-thumb {
+  transform: translateX(var(--thumb-x, 0px)) scaleX(1.18);
 }
 
 /* ---------- 侧边面板（花笺 Floral 式：主内容区右侧推开，宽 0↔320px 过渡，不遮挡任何按钮） ---------- */
@@ -741,8 +909,8 @@ button {
   opacity: 0;
   pointer-events: none;
   transition:
-    opacity 0.3s ease,
-    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.26s ease,
+    transform 0.34s var(--ease-spring);
 }
 .side-panel-inner.visible {
   transform: translateX(0);
@@ -845,19 +1013,27 @@ button {
   background: var(--color-paper);
   border: 1px solid var(--color-paper-deep);
   transition:
-    background-color 0.18s ease,
-    color 0.18s ease,
-    border-color 0.18s ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-spring);
 }
 .theme-option:hover {
   color: var(--color-ink);
   border-color: var(--color-ink-ghost);
+  transform: translateY(-1px);
+}
+.theme-option:active {
+  transform: translateY(0) scale(0.96);
 }
 .theme-option.selected {
   background: var(--color-bamboo);
   color: #f6f3ec;
   border-color: var(--color-bamboo);
-  box-shadow: 0 2px 8px var(--color-shadow);
+  box-shadow:
+    0 2px 10px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 24%, transparent);
 }
 .theme-option-icon {
   font-size: 13px;
@@ -1045,13 +1221,15 @@ button {
   align-items: center;
   gap: 9px;
   max-width: 320px;
-  padding: 11px 15px;
-  border-radius: 11px;
+  padding: 10px 14px 10px 10px;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--color-paper-warm) 88%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid color-mix(in srgb, var(--color-paper-deep) 60%, transparent);
-  box-shadow: 0 4px 18px var(--color-shadow-deep);
+  box-shadow:
+    0 8px 24px var(--color-shadow-deep),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 40%, transparent);
   font-size: 12.5px;
   color: var(--color-ink-soft);
   opacity: 0;
@@ -1060,16 +1238,25 @@ button {
 }
 
 .toast-entry {
-  animation: toast-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: toast-in 0.4s var(--ease-spring) forwards;
 }
 .toast-exit {
-  animation: toast-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: toast-out 0.24s var(--ease-out) forwards;
 }
 
 .toast-check {
-  color: var(--color-bamboo);
-  font-size: 13px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bamboo);
+  color: #f6f3ec;
+  font-size: 11px;
   font-weight: 700;
+  box-shadow: 0 2px 6px var(--color-shadow);
 }
 
 /* ---------- 动画 ---------- */
@@ -1193,19 +1380,47 @@ button {
   font-size: 12px;
   font-weight: 500;
   color: var(--color-ink-soft);
-  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-spring);
 }
-.seg-btn:hover {
+.seg-btn:hover:not(:disabled) {
   color: var(--color-bamboo);
   border-color: var(--color-bamboo-light);
   background: var(--color-bamboo-mist);
+}
+.seg-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.seg-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 主操作按钮（此前只有类名没有样式）：竹青实底 + 柔和高光 */
+.seg-btn.primary {
+  background: var(--color-bamboo);
+  color: var(--color-paper);
+  border-color: var(--color-bamboo);
+  box-shadow:
+    0 2px 8px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 24%, transparent);
+}
+.seg-btn.primary:hover:not(:disabled) {
+  background: var(--color-bamboo-light);
+  color: var(--color-paper);
+  border-color: var(--color-bamboo-light);
 }
 .seg-btn.danger {
   color: var(--color-danger);
   border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
 }
-.seg-btn.danger:hover {
+.seg-btn.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 .seg-group {
@@ -1223,17 +1438,27 @@ button {
   color: var(--color-ink-soft);
   background: var(--color-paper);
   border: 1px solid var(--color-paper-deep);
-  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-spring);
 }
 .seg-option:hover {
   color: var(--color-ink);
   border-color: var(--color-ink-ghost);
 }
+.seg-option:active {
+  transform: scale(0.96);
+}
 .seg-option.selected {
   background: var(--color-bamboo);
   color: #f6f3ec;
   border-color: var(--color-bamboo);
-  box-shadow: 0 2px 8px var(--color-shadow);
+  box-shadow:
+    0 2px 8px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 24%, transparent);
 }
 
 .range-row {
@@ -1264,6 +1489,7 @@ button {
   appearance: none;
   -webkit-appearance: none;
   border-radius: 999px;
+  /* 已走部分由 RangeRow.tsx 用内联渐变填充，这里只作回退 */
   background: var(--color-paper-deep);
   outline: none;
   cursor: pointer;
@@ -1278,6 +1504,16 @@ button {
   border: 2px solid #ffffff;
   box-shadow: 0 1px 5px var(--color-shadow-deep);
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) ease;
+}
+.range-row input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.18);
+}
+.range-row input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.3);
+  box-shadow: 0 2px 10px var(--color-shadow-deep);
 }
 
 /* ============ 通用下拉框（主题适配） ============ */
@@ -1357,6 +1593,7 @@ button {
 .ai-popup-messages {
   flex: 1;
   overflow-y: auto;
+  scroll-behavior: smooth;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -1440,8 +1677,10 @@ button {
     inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent),
     inset 0 0 0 1px color-mix(in srgb, var(--color-paper-deep) 65%, transparent);
   opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  transform: translateY(8px) scale(0.98);
+  transition:
+    opacity 0.32s ease,
+    transform 0.4s var(--ease-spring);
   pointer-events: none;
 }
 /* 噪声纹理（复刻侧边栏质感） */
@@ -1462,7 +1701,7 @@ button {
 }
 .audio-panel.visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   pointer-events: auto;
 }
 .audio-panel-body {
@@ -1699,6 +1938,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scroll-behavior: smooth;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1722,6 +1962,17 @@ button {
 }
 .ai-msg {
   display: flex;
+  animation: msg-in 0.32s var(--ease-out) both;
+}
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .ai-msg.user {
   justify-content: flex-end;
@@ -1739,20 +1990,58 @@ button {
   word-break: break-word;
   background: var(--color-paper-deep);
   color: var(--color-ink);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-shadow) 60%, transparent);
 }
 .ai-msg.user .ai-msg-bubble {
   background: var(--color-bamboo);
   color: #fff;
   border-bottom-right-radius: 4px;
+  box-shadow:
+    0 2px 6px var(--color-shadow),
+    inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 22%, transparent);
 }
 .ai-msg.assistant .ai-msg-bubble {
   border-bottom-left-radius: 4px;
 }
 .ai-thinking {
   align-self: flex-start;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   color: var(--color-ink-faint);
-  padding: 4px 6px;
+  padding: 6px 10px;
+  animation: think-pulse 1.4s ease-in-out infinite;
+}
+/* 思考中的三颗跳点（HIG 进度反馈：轻量、循环、不打扰） */
+.ai-thinking::after {
+  content: "";
+  width: 14px;
+  height: 4px;
+  background: radial-gradient(
+    circle at 2px 2px,
+    var(--color-ink-faint) 2px,
+    transparent 2.6px
+  );
+  background-size: 14px 4px;
+  animation: think-dots 1.2s steps(4, end) infinite;
+}
+@keyframes think-dots {
+  0% {
+    background-position: -8px 0;
+  }
+  100% {
+    background-position: 10px 0;
+  }
+}
+@keyframes think-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .ai-input-bar {
   padding: 12px 16px;
@@ -1988,9 +2277,26 @@ button {
   letter-spacing: 2px;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition:
+    background-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-spring);
+  animation: btn-pop 0.32s var(--ease-spring) both;
 }
 .translate-button:hover {
   background: var(--color-bamboo-light);
+}
+.translate-button:active {
+  transform: scale(0.94);
+}
+@keyframes btn-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .translate-popup {
   display: flex;
@@ -2004,6 +2310,17 @@ button {
     inset 0 0 0 1px color-mix(in srgb, var(--color-paper-deep) 65%, transparent);
   overflow: hidden;
   font-size: 13px;
+  animation: popup-in 0.3s var(--ease-spring) both;
+}
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .translate-popup-head {
   display: flex;

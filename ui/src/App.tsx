@@ -603,11 +603,12 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v1.0.1</div>
+          <div className="sidebar-version">v1.0.2</div>
           </div>
         </aside>
 
         <section className="detail-pane">
+          <div className="detail-content" key={activeId}>
           {isPerformance ? (
             <PerformancePanel
               enabled={state.performanceMonitor}
@@ -624,7 +625,7 @@ function App({ initial }: AppProps) {
               onBaseUrlChange={handleAiBaseUrlChange}
             />
           ) : isTaskbar ? (
-            <div className="detail-card noise-bg animate-scale-in">
+            <div className="detail-card noise-bg">
               <div className="detail-hero">
                 <div className="detail-icon">{feature.icon}</div>
                 <div className="detail-titles">
@@ -680,7 +681,7 @@ function App({ initial }: AppProps) {
               onSourceLangChange={handleTranslateSourceLangChange}
             />
           ) : (
-            <div className="detail-card noise-bg animate-scale-in" key={feature.id}>
+            <div className="detail-card noise-bg">
               <div className="detail-hero">
                 <div className="detail-icon">{feature.icon}</div>
                 <div className="detail-titles">
@@ -708,6 +709,7 @@ function App({ initial }: AppProps) {
               <p className="detail-note">{feature.detail}</p>
             </div>
           )}
+          </div>
 
           <div className="detail-footer">
             <span className="hint-icon">␣</span>

@@ -32,6 +32,38 @@
 
 ## 最近完成
 
+- 2026-09-05 发布 v1.0.2（进行中：构建→提交→推送→Release）
+  - 用户验收 UI 改版后指示「打包发布」；版本号 1.0.1 → **1.0.2** 全链路同步
+    （v1.0.1 保留为本地存档点 checkpoint-v1.0.1-2026-09-05，不发布；
+    README 更新日志把 v1.0.1 的兼容性/Markdown 并入 v1.0.2 说明）
+  - 流程：npm run release → 提交+tag v1.0.2 → push origin main + tag →
+    gh release create（GH_TOKEN 从 git credential fill 提取；正文用 --notes-file 保 UTF-8）
+
+- 2026-09-05 前端界面美化与动效优化（参照 Apple HIG；未提版本号，构建中）
+  - 存档点：commit `561597a` + 本地 tag `checkpoint-v1.0.1-2026-09-05`（未推送）。
+    **回退方法：`git checkout checkpoint-v1.0.1-2026-09-05`**（或 `git revert 561597a`）
+  - 用户新约定（已写入工程约定，最高优先级）：默认只更新本地测试版
+    （`npm run tauri build -- --no-bundle`）；不打包安装包、不推送，除非用户明确说
+  - 设计令牌：styles.css :root 新增 `--ease-out / --ease-spring / --dur-fast|med|slow`
+    （HIG 动效：快速进入平稳落地；弹簧仅用于按压回弹等小反馈）
+  - 全局微交互：所有按钮按压 scale(0.97)（win-btn 除外）；:focus-visible 焦点环；
+    输入控件聚焦竹青光晕；`@media (prefers-reduced-motion: reduce)` 全量关闭动效
+  - 侧边栏：feature-item 悬停右移 2px、激活项左侧白色强调条 + icon-pop 弹跳、按压回缩
+  - 详情区：新增 `.detail-content` keyed 包装（切换功能整块淡入+位移，统一动画）；
+    detail-card/PerformancePanel/TranslatePanel/AiPanel 移除各自 animate-scale-in 防双重动画；
+    detail-icon 渐变底+高光；state-dot 呼吸脉冲
+  - 控件：Switch 按压回弹 + 滑块拉长 + 悬停描边；**seg-btn.primary 主按钮样式补全**
+    （此前只有类名无样式，保存/发送按钮从此有竹青实底）；theme-option/seg-option
+    悬停浮起+按压回缩；RangeRow 滑块已走部分渐变填充 + thumb 悬停放大；
+    perf-nav-item 同款精修
+  - Toast：胶囊化（圆角 999px）+ 竹青圆形 ✓ 徽标 + 弹簧入场
+  - AI：消息气泡入场动画（msg-in）、用户气泡高光；「正在思考…」脉冲 + 滚动三点动画；
+    AiPanel/AiPopup 新增**自动滚动到底部**（新消息/流式增量时）；ai-messages 平滑滚动
+  - 音频面板：显示动画改弹簧（translateY+scale）；翻译按钮 btn-pop 弹入 + 按压回缩；
+    翻译弹窗 popup-in 入场
+  - 窗口：app-shell 无背景图时纸面微渐变；win-btn 圆角 6px + 按压态（关闭键深红）
+  - 验证：tsc + vite 构建通过；待 tauri build --no-bundle 完成后冒烟
+
 - 2026-09-XX v1.0.1 跨机器兼容性加固 + AI 回复 Markdown 渲染（构建中）
   - 背景：用户实测 v1.0.0 修复包后，**音频识别 / 任务栏透明 / 鼠标选取翻译**三功能
     在其他机器上仍然「开关无反应/无效果」（多台机器、Windows 版本不确定）

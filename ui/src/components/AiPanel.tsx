@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AiMessage } from "../vite-env";
 import {
   aiSend,
@@ -37,6 +37,13 @@ export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPa
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // 新消息 / 流式增量时自动滚到底部（HIG：保持内容与输入上下文的可见性）
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, generating]);
 
   // 初始加载配置状态并订阅流式事件
   useEffect(() => {
@@ -130,7 +137,7 @@ export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPa
   };
 
   return (
-    <div className="ai-panel animate-scale-in">
+    <div className="ai-panel">
       {/* 配置区 */}
       <div className="ai-config-bar">
         {hasKey ? (
@@ -197,7 +204,7 @@ export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPa
       )}
 
       {/* 消息区 */}
-      <div className="ai-messages">
+      <div className="ai-messages" ref={messagesRef}>
         {messages.length === 0 && (
           <div className="ai-welcome">
             <div className="ai-welcome-title">AI 助手</div>

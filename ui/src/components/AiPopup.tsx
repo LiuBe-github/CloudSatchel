@@ -29,6 +29,13 @@ export default function AiPopup() {
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // 新消息 / 流式增量时自动滚到底部
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, generating]);
 
   // 初始读取 AI 配置（Key 是否存在、模型、接口地址）
   useEffect(() => {
@@ -160,7 +167,7 @@ export default function AiPopup() {
       </header>
 
       {/* 消息区 */}
-      <div className="ai-popup-messages">
+      <div className="ai-popup-messages" ref={messagesRef}>
         {messages.length === 0 && (
           <div className="ai-popup-welcome">
             <div className="ai-popup-welcome-title">快速提问</div>
