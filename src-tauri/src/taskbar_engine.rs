@@ -28,6 +28,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
+use crate::dlog;
+
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -304,18 +306,79 @@ fn terminate_engine_processes() {
     }
 }
 
+/// 引擎注入进度探针：TranslucentTB 启动后会把引擎目录的 ExplorerTAP.dll
+/// 复制到 %TEMP%\TranslucentTB\（注入 Explorer 前的准备动作）。进程存活
+/// 但该文件迟迟不出现 = 注入被安全软件拦截 / 引擎初始化失败（存活校验盲区）。
+fn tap_copied() -> bool {
+    std::path::Path::new(&std::env::var("TEMP").unwrap_or_default())
+        .join("TranslucentTB")
+        .join("ExplorerTAP.dll")
+        .exists()
+}
+
 /// 启动引擎（开启透明）
 pub fn start() -> bool {
     if !release_engine() {
+        dlog::write("[taskbar] engine release failed");
         return false;
     }
     let exe = engine_dir().join("TranslucentTB.exe");
     match Command::new(&exe).current_dir(engine_dir()).spawn() {
-        Ok(child) => {
-            *ENGINE_PID.lock().unwrap() = Some(child.id());
-            true
+        Ok(mut child) => {
+            let pid = child.id();
+            *ENGINE_PID.lock().unwrap() = Some(pid);
+            dlog::write(&format!("[taskbar] engine spawned pid={pid}"));
+            // 存活校验：CreateProcess 成功不代表引擎能正常起来——缺运行库 /
+            // 被安全软件拦截 / 注入 Explorer 失败都会让进程在启动后立刻退出。
+            // 之前只检查 spawn 返回值会误报成功（开关亮着但任务栏无变化），
+            // 因此在 1 秒后确认进程仍存活才返回成功。
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let code = status.code().unwrap_or(-1);
+                    // 常见 NTSTATUS 退出码翻译成人话，坏机器上无需查表
+                    let hint = match code {
+                        -1073741515 => "（0xC0000135：缺少 DLL，如 VC++ 运行库）",
+                        -1073741511 => "（0xC0000139：DLL 缺少导出函数）",
+                        -1073741819 => "（0xC0000005：访问违例）",
+                        _ => "",
+                    };
+                    dlog::write(&format!(
+                        "[taskbar] engine exited shortly after start pid={pid} code={code} (0x{code:X}){hint}"
+                    ));
+                    *ENGINE_PID.lock().unwrap() = None;
+                    false
+                }
+                Ok(None) => {
+                    let probe1 = tap_copied();
+                    dlog::write(&format!(
+                        "[taskbar] engine alive pid={pid}; tap probe t+1s copied={probe1}"
+                    ));
+                    // 再等 2 秒复核注入探针：注入发生在启动后不久，1 秒可能太早
+                    std::thread::sleep(std::time::Duration::from_millis(2000));
+                    let probe2 = tap_copied();
+                    dlog::write(&format!(
+                        "[taskbar] engine alive pid={pid}; tap probe t+3s copied={probe2}"
+                    ));
+                    if !probe2 {
+                        dlog::write(
+                            "[taskbar] WARNING 引擎进程存活但未复制注入探针：注入可能被安全软件拦截，\
+                             任务栏透明大概率无效（存活校验的盲区）",
+                        );
+                    }
+                    true
+                }
+                Err(e) => {
+                    dlog::write(&format!("[taskbar] engine wait failed: {e}"));
+                    *ENGINE_PID.lock().unwrap() = None;
+                    false
+                }
+            }
         }
-        Err(_) => false,
+        Err(e) => {
+            dlog::write(&format!("[taskbar] engine spawn failed: {e}"));
+            false
+        }
     }
 }
 

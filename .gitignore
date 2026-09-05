@@ -11,3 +11,6 @@ __pycache__/
 # 日志与临时文件
 *.log
 _test_local.html
+
+# 构建产物（测试版 exe 与安装包不入库）
+/CloudSatchel*.exe

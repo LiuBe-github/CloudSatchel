@@ -1,6 +1,6 @@
 [package]
 name = "cloud-satchel"
-version = "1.0.0"
+version = "1.0.1"
 description = "云笈 - 纯净本地 Windows 桌面工具"
 authors = ["LiuBe"]
 edition = "2021"

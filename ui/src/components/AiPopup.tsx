@@ -11,6 +11,7 @@ import {
   onAiError,
 } from "../lib/bridge";
 import { useThemeInit } from "../lib/theme";
+import { Markdown } from "../lib/markdown";
 
 /**
  * AI 小窗（FR-17）：全局快捷键（默认 Ctrl+Shift+Space）呼出的小型 AI 问答窗口。
@@ -172,7 +173,9 @@ export default function AiPopup() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`ai-msg ${m.role === "user" ? "user" : "assistant"}`}>
-            <div className="ai-msg-bubble">{m.content}</div>
+            <div className="ai-msg-bubble">
+              {m.role === "assistant" ? <Markdown content={m.content} /> : m.content}
+            </div>
           </div>
         ))}
         {generating && <div className="ai-thinking">正在思考…</div>}

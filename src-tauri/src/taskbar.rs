@@ -70,15 +70,15 @@ struct RtlOsVersionInfoW {
 
 type RtlGetVersionFn = unsafe extern "system" fn(*mut RtlOsVersionInfoW) -> i32;
 
-/// Windows 11（含 25H2/26200）：任务栏是 XAML 岛，build >= 22000
-fn is_windows_11() -> bool {
+/// 读取真实 OS build 号（RtlGetVersion，不受应用兼容模式影响；失败返回 0）
+pub fn os_build_number() -> u32 {
     unsafe {
         let ntdll = LoadLibraryW(w!("ntdll.dll"));
         if ntdll.is_null() {
-            return false;
+            return 0;
         }
         let Some(proc) = GetProcAddress(ntdll, s!("RtlGetVersion")) else {
-            return false;
+            return 0;
         };
         let func: RtlGetVersionFn = std::mem::transmute(proc);
         let mut info = RtlOsVersionInfoW {
@@ -89,8 +89,17 @@ fn is_windows_11() -> bool {
             dw_platform_id: 0,
             sz_csd_version: [0; 128],
         };
-        func(&mut info) == 0 && info.dw_build_number >= 22000
+        if func(&mut info) == 0 {
+            info.dw_build_number
+        } else {
+            0
+        }
     }
+}
+
+/// Windows 11（含 25H2/26200）：任务栏是 XAML 岛，build >= 22000
+pub fn is_windows_11() -> bool {
+    os_build_number() >= 22000
 }
 
 // ---------------------------------------------------------------------------
@@ -129,23 +138,37 @@ unsafe fn apply_accent(hwnd: HWND, enabled: bool) -> bool {
     func(hwnd, &mut data) != 0
 }
 
+struct AccentCtx {
+    enabled: bool,
+    /// 是否有任一任务栏窗口接受 Accent 策略（用于成功校验，避免“开关亮着但无效果”）
+    any_ok: bool,
+}
+
 unsafe extern "system" fn enum_apply(hwnd: HWND, lparam: LPARAM) -> i32 {
-    let enabled = lparam != 0;
+    let ctx = &mut *(lparam as *mut AccentCtx);
     let mut buf = vec![0u16; MAX_CLASS_LEN];
     let n = GetClassNameW(hwnd, buf.as_mut_ptr(), MAX_CLASS_LEN as i32);
     if n > 0 {
         let cls = String::from_utf16_lossy(&buf[..n as usize]);
         if cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" {
-            apply_accent(hwnd, enabled);
+            if apply_accent(hwnd, ctx.enabled) {
+                ctx.any_ok = true;
+            }
         }
     }
     1 // 继续枚举
 }
 
-fn apply_accent_to_taskbars(enabled: bool) {
+/// 对所有任务栏窗口下发 Accent 策略；返回是否有任务栏窗口接受
+fn apply_accent_to_taskbars(enabled: bool) -> bool {
+    let mut ctx = AccentCtx {
+        enabled,
+        any_ok: false,
+    };
     unsafe {
-        EnumWindows(Some(enum_apply), enabled as isize as LPARAM);
+        EnumWindows(Some(enum_apply), &mut ctx as *mut AccentCtx as LPARAM);
     }
+    ctx.any_ok
 }
 
 // ---------------------------------------------------------------------------
@@ -219,11 +242,36 @@ unsafe fn restore_old_registry_backup(hkey: HKEY) {
 /// 返回是否成功（Win11 引擎启动失败时返回 false）。
 pub fn set_transparent(enabled: bool) -> bool {
     if is_windows_11() {
-        crate::taskbar_engine::set(enabled)
+        crate::dlog::write(&format!(
+            "[taskbar] set_transparent({enabled}) branch=win11-engine build={}",
+            os_build_number()
+        ));
+        let ok = crate::taskbar_engine::set(enabled);
+        if enabled && !ok {
+            crate::dlog::write("[taskbar] Win11 透明引擎启动失败，已回滚开关");
+        }
+        ok
     } else {
-        apply_accent_to_taskbars(enabled);
-        true
+        crate::dlog::write(&format!(
+            "[taskbar] set_transparent({enabled}) branch=win10-accent build={}",
+            os_build_number()
+        ));
+        let ok = apply_accent_to_taskbars(enabled);
+        if enabled && !ok {
+            crate::dlog::write("[taskbar] Win10 Accent API 应用失败，已回滚开关");
+        }
+        ok
     }
+}
+
+/// Win10 后端：重新下发 Accent 策略（仅当任务栏当前处于透明状态时）。
+/// Explorer 重启、主题/强调色切换、其他程序重设 Accent 都会让透明静默丢失
+/// 而开关仍亮着——由 poll_loop 周期调用本函数重放，保持透明持续生效。
+pub fn reapply_accent() {
+    if is_windows_11() {
+        return;
+    }
+    apply_accent_to_taskbars(true);
 }
 
 /// 恢复系统默认任务栏（供关闭功能 / 退出时调用）

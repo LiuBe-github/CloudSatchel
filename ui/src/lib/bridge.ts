@@ -45,6 +45,7 @@ const FALLBACK_STATE: AppState = {
   translateTargetLang: "auto-zh-Hans",
   translateSourceLang: "auto",
   translateHasMsKey: false,
+  elevated: false,
   fullscreenActive: false,
   theme: "system",
   animating: false,
@@ -158,6 +159,12 @@ export function onMediaState(cb: (state: MediaState) => void): () => void {
   return () => {
     void unlisten.then((fn) => fn());
   };
+}
+
+/** 查询当前媒体状态（面板挂载时补一次，修复慢机器上边沿事件被冷启动丢弃） */
+export async function getMediaState(): Promise<MediaState | null> {
+  if (!inTauri()) return null;
+  return (await invoke<MediaState>("get_media_state")) ?? null;
 }
 
 /** 订阅音频波形（16 档频段能量） */
@@ -397,6 +404,24 @@ export function close(): void {
 export function onStateUpdate(cb: (state: AppState) => void): () => void {
   if (!inTauri()) return () => {};
   const unlisten = listen<AppState>("state-updated", (event) => cb(event.payload));
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 用系统默认浏览器打开外部链接（AI 回复 Markdown 中的 http/https 链接） */
+export async function openUrl(url: string): Promise<void> {
+  if (!inTauri()) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  await invoke("open_url", { url });
+}
+
+/** 订阅任务栏透明引擎启动失败（后端已回滚开关，这里只负责提示） */
+export function onTaskbarTransparentFailed(cb: () => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen("taskbar-transparent-failed", () => cb());
   return () => {
     void unlisten.then((fn) => fn());
   };

@@ -31,6 +31,7 @@ import {
   minimize,
   toggleMaximize,
   onStateUpdate,
+  onTaskbarTransparentFailed,
 } from "./lib/bridge";
 import { changeTheme, watchSystemTheme, useThemeInit } from "./lib/theme";
 import type { AppState, BackgroundSettings, ThemeMode } from "./vite-env";
@@ -145,6 +146,7 @@ function App({ initial }: AppProps) {
       translateTargetLang: "auto-zh-Hans",
       translateSourceLang: "auto",
       translateHasMsKey: false,
+      elevated: false,
       fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
@@ -175,14 +177,27 @@ function App({ initial }: AppProps) {
   // 首次进入：读取后端状态
   useEffect(() => {
     getState()
-      .then((s) => setState(s))
+      .then((s) => {
+        setState(s);
+        if (s.elevated) {
+          toastRef.current?.show(
+            "检测到以管理员身份运行：鼠标选取翻译与双击隐藏桌面图标可能失效，建议从开始菜单或桌面快捷方式正常启动",
+          );
+        }
+      })
       .catch(() => {});
   }, []);
 
   // 监听 Tauri 后端推送的状态更新（桌面双击/动画进行时）
   useEffect(() => {
     const unlisten = onStateUpdate((s) => setState(s));
-    return unlisten;
+    const offFailed = onTaskbarTransparentFailed(() => {
+      toastRef.current?.show("任务栏透明开启失败：系统阻止了透明引擎");
+    });
+    return () => {
+      unlisten();
+      offFailed();
+    };
   }, []);
 
   // 主题跟随系统
@@ -588,7 +603,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v1.0.0</div>
+          <div className="sidebar-version">v1.0.1</div>
           </div>
         </aside>
 

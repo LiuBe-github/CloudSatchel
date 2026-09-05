@@ -11,6 +11,7 @@ import {
   setAiBaseUrl,
   setAiModel,
 } from "../lib/bridge";
+import { Markdown } from "../lib/markdown";
 
 interface AiPanelProps {
   /** 当前模型名（来自 AppState，持久化） */
@@ -207,7 +208,9 @@ export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPa
         )}
         {messages.map((m, i) => (
           <div key={i} className={`ai-msg ${m.role === "user" ? "user" : "assistant"}`}>
-            <div className="ai-msg-bubble">{m.content}</div>
+            <div className="ai-msg-bubble">
+              {m.role === "assistant" ? <Markdown content={m.content} /> : m.content}
+            </div>
           </div>
         ))}
         {generating && <div className="ai-thinking">正在思考…</div>}

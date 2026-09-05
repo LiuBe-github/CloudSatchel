@@ -4,6 +4,7 @@ import type { MediaState } from "../vite-env";
 import { useThemeInit } from "../lib/theme";
 import {
   audioMediaControl,
+  getMediaState,
   getState,
   getSystemMute,
   getSystemVolume,
@@ -178,6 +179,16 @@ export default function AudioPanel() {
       setEnabled(s.audioPanelEnabled);
       setOpacity(s.audioPanelOpacity);
     });
+    // 慢机器上 WebView 冷启动可能错过首次 media-state 边沿事件（启动即播放 /
+    // WASAPI 兜底只在 arm 瞬间发一次）→ 挂载后主动查询当前状态补救
+    void getMediaState()
+      .then((s) => {
+        if (s) {
+          mediaRef.current = { positionSecs: s.positionSecs, at: Date.now() };
+          setMedia(s);
+        }
+      })
+      .catch(() => {});
     return () => {
       offMedia();
       offWave();
@@ -235,11 +246,13 @@ export default function AudioPanel() {
       : 0;
 
   // 副标题：歌手 · 专辑优先；无歌手信息时显示应用名
-  const subText = media?.artist
-    ? media.album
-      ? `${media.artist} · ${media.album}`
-      : media.artist
-    : media?.appName || (media?.active ? "媒体会话" : "");
+  const subText = media?.fallback
+    ? "系统音频 · 未识别到媒体信息"
+    : media?.artist
+      ? media.album
+        ? `${media.artist} · ${media.album}`
+        : media.artist
+      : media?.appName || (media?.active ? "媒体会话" : "");
 
   const styleVars = {
     ...(accent ? ({ "--audio-accent": accent } as React.CSSProperties) : {}),

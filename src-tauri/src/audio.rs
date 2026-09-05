@@ -55,8 +55,21 @@ use crate::dlog;
 /// SMTC 事件驱动间隔（毫秒）
 const SMTC_RETRY_MS: u64 = 3000;
 const SMTC_FLAG_POLL_MS: u64 = 200;
-/// 切歌后等待缩略图“安定”再重读的时间（应用更新封面是异步的）
+/// 无会话时低频兜底轮询间隔（毫秒）：部分系统上 SMTC 事件订阅收不到新会话
+/// 通知（如 System Events Broker 被优化软件禁用），事件驱动会永远发现不了
+/// 新播放；无会话时低频重读一次（有会话时仍完全事件驱动，不轮询，避免唤醒
+/// NPSM 服务导致 CPU 高占用）。
+const SMTC_IDLE_POLL_MS: u64 = 5000;
+/// WASAPI 兜底面板“出声确认”时长（毫秒）：系统提示音等短音不触发面板
+const FALLBACK_ARM_MS: u64 = 2000;
+/// 声音停止后延迟隐藏兜底面板（毫秒）
+const FALLBACK_HIDE_MS: u64 = 1000;
+/// 未确认时重读缩略图的间隔（应用更新封面是异步的，旧封面可能残留几百毫秒）
 const THUMB_SETTLE_MS: u64 = 400;
+/// 非空封面确认所需的“切歌后稳定时间”：封面值必须从切歌起稳定超过该时长
+/// 且至少连续读取两次一致才确认。避免上一首封面在应用异步更新前被误确认
+/// 而永久错图。
+const THUMB_CONFIRM_MS: u64 = 1500;
 /// 空封面重读间隔（浏览器等封面常异步加载，过早接受会永久丢封面）
 const THUMB_EMPTY_RETRY_MS: u64 = 1000;
 /// 空封面最多重读次数，之后接受为空（避免持续空转）
@@ -71,6 +84,44 @@ const FFT_SIZE: usize = 512;
 static RUNNING: AtomicBool = AtomicBool::new(true);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static THREAD: OnceLock<()> = OnceLock::new();
+/// SMTC 当前是否有“正在播放”的会话（wave_loop 用它判断何时需要 WASAPI 兜底面板）。
+/// 只在 SMTC 会话 active 且 playing 时置真：若会话存在但已暂停，而系统仍在
+/// 出声（如其他应用在播放），兜底面板应接管显示。
+static SMTC_PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// 最近一次推送的媒体状态缓存。
+/// 辅助窗口（音频面板）的 WebView 冷启动可能需要数秒：若启动即播放，
+/// 首次 `media-state` 事件可能在监听器就绪前被丢弃且此后不再重发
+/// （边沿触发）→ 慢机器上面板永不显示。前端挂载后通过
+/// `get_media_state` 命令主动查询一次当前值即可补救。
+static MEDIA_STATE: OnceLock<Mutex<MediaState>> = OnceLock::new();
+
+/// 更新缓存并推送媒体状态（去重 + 变更日志，全模块唯一的 emit 入口）
+fn emit_state(app: &AppHandle, state: MediaState) {
+    let cell = MEDIA_STATE.get_or_init(|| Mutex::new(state.clone()));
+    let mut cur = cell.lock().unwrap();
+    let same = serde_json::to_string(&*cur).unwrap_or_default()
+        == serde_json::to_string(&state).unwrap_or_default();
+    if !same {
+        dlog::write(&format!(
+            "[audio] media-state -> active={} playing={} supported={} fallback={} title={}",
+            state.active, state.playing, state.supported, state.fallback, state.title
+        ));
+    }
+    *cur = state.clone();
+    drop(cur);
+    if !same {
+        let _ = app.emit("media-state", &state);
+    }
+}
+
+/// 当前媒体状态（供前端挂载时查询，修复边沿事件丢失）
+pub fn get_current_state() -> MediaState {
+    MEDIA_STATE
+        .get()
+        .map(|m| m.lock().unwrap().clone())
+        .unwrap_or_else(MediaState::idle)
+}
 
 /// 封面缓存条目：候选/确认两段式，防切歌瞬间读到上一首封面后永久缓存错图。
 struct ThumbEntry {
@@ -78,10 +129,15 @@ struct ThumbEntry {
     key: String,
     /// data URL（空串 = 无封面 / 未就绪）
     value: String,
-    /// 是否已确认（非空值连续两次读取一致；空值重试达上限后确认）
+    /// 是否已确认（非空值连续两次读取一致且稳定超过 THUMB_CONFIRM_MS；
+    /// 空值重试达上限后确认）。未确认期间不向 UI 返回候选值，避免错图。
     confirmed: bool,
-    /// 最近一次写入候选的时间（用于安定重读计时）
-    seen_at: std::time::Instant,
+    /// 曲目键进入本条目（切歌）的时间，确认窗口以此为锚点
+    key_at: std::time::Instant,
+    /// 最近一次读取时间（控制重读间隔）
+    last_read_at: std::time::Instant,
+    /// 当前值连续读取一致的次数
+    reads: u32,
     /// 空封面重读次数
     empty_tries: u32,
 }
@@ -123,6 +179,8 @@ pub struct MediaState {
     pub pause_enabled: bool,
     /// 系统是否支持 SMTC（Win10 1809+）
     pub supported: bool,
+    /// 是否为 WASAPI 兜底状态（SMTC 无正在播放的会话，但系统输出端确实在出声）
+    pub fallback: bool,
 }
 
 impl MediaState {
@@ -142,7 +200,31 @@ impl MediaState {
             play_enabled: false,
             pause_enabled: false,
             supported: true,
+            fallback: false,
         }
+    }
+}
+
+/// WASAPI 兜底状态：SMTC 无正在播放的会话（系统不支持 / 事件代理失效 /
+/// 播放器未注册媒体会话），但系统输出端确实在出声。面板显示通用
+/// “正在播放音频”与波形，控制按钮不可用。
+fn fallback_state() -> MediaState {
+    MediaState {
+        active: true,
+        playing: true,
+        thumbnail: String::new(),
+        app_name: "系统音频".to_string(),
+        title: "正在播放音频".to_string(),
+        artist: String::new(),
+        album: String::new(),
+        position_secs: 0.0,
+        duration_secs: 0.0,
+        prev_enabled: false,
+        next_enabled: false,
+        play_enabled: false,
+        pause_enabled: false,
+        supported: true,
+        fallback: true,
     }
 }
 
@@ -164,6 +246,7 @@ pub fn start(app: AppHandle) {
 /// 停止轮询并清理（退出应用时调用）
 pub fn stop() {
     RUNNING.store(false, Ordering::SeqCst);
+    SMTC_PLAYING.store(false, Ordering::SeqCst);
 }
 
 /// 开关：false 时停止采集并推送空闲状态（面板隐藏）
@@ -176,9 +259,16 @@ pub fn set_enabled(enabled: bool) {
 pub fn control(app: AppHandle, action: &str) {
     let action = action.to_string();
     tauri::async_runtime::spawn_blocking(move || {
+        // 线程池线程没有 COM 初始化：SMTC 的 RequestAsync 需要 COM。
+        // 之前这里直接调 execute_control，媒体控制按钮在真实环境可能从未生效过
+        // （RequestAsync 报 CO_E_NOTINITIALIZED 只写日志）。先初始化 MTA 再执行。
+        let need_uninit = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() };
         let result = execute_control(&action);
         if let Err(e) = result {
             dlog::write(&format!("[audio] control {action} failed: {e}"));
+        }
+        if need_uninit {
+            unsafe { CoUninitialize() };
         }
         let _ = app.emit("media-control-done", ());
     });
@@ -219,11 +309,12 @@ fn smtc_loop(app: AppHandle) {
             Err(e) => dlog::write(&format!("[audio] smtc manager request failed: {e}")),
         }
 
+        SMTC_PLAYING.store(false, Ordering::SeqCst);
         if !reported_unsupported {
             reported_unsupported = true;
             let mut idle = MediaState::idle();
             idle.supported = false;
-            let _ = app.emit("media-state", idle);
+            emit_state(&app, idle);
         }
         std::thread::sleep(Duration::from_millis(SMTC_RETRY_MS));
     }
@@ -261,8 +352,8 @@ fn run_smtc_events(app: AppHandle, manager: GlobalSystemMediaTransportControlsSe
     }
 
     let mut session_sub: Option<SessionSub> = None;
-    let mut last_state: Option<String> = None;
-    let mut thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+    let mut idle_poll_counter: u64 = 0;
+    let mut thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app);
 
     loop {
         match rx.recv_timeout(Duration::from_millis(SMTC_FLAG_POLL_MS)) {
@@ -270,7 +361,7 @@ fn run_smtc_events(app: AppHandle, manager: GlobalSystemMediaTransportControlsSe
                 if !RUNNING.load(Ordering::SeqCst) || !ENABLED.load(Ordering::SeqCst) {
                     break;
                 }
-                thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+                thumb_key = refresh_smtc(&manager, &mut session_sub, &tx, &app);
             }
             Err(RecvTimeoutError::Timeout) => {
                 if !RUNNING.load(Ordering::SeqCst) || !ENABLED.load(Ordering::SeqCst) {
@@ -281,8 +372,18 @@ fn run_smtc_events(app: AppHandle, manager: GlobalSystemMediaTransportControlsSe
                 if let Some(k) = thumb_key.as_deref() {
                     if thumbnail_refresh_due_for(k) {
                         thumb_key =
-                            refresh_smtc(&manager, &mut session_sub, &tx, &app, &mut last_state);
+                            refresh_smtc(&manager, &mut session_sub, &tx, &app);
                     }
+                }
+                // 无会话时低频兜底轮询：事件订阅失效（System Events Broker 被
+                // 禁用等）时收不到新会话通知，主动重读一次才能发现新播放。
+                idle_poll_counter += 1;
+                if thumb_key.is_none()
+                    && idle_poll_counter * SMTC_FLAG_POLL_MS >= SMTC_IDLE_POLL_MS
+                {
+                    idle_poll_counter = 0;
+                    thumb_key =
+                        refresh_smtc(&manager, &mut session_sub, &tx, &app);
                 }
             }
             Err(RecvTimeoutError::Disconnected) => break,
@@ -296,7 +397,7 @@ fn run_smtc_events(app: AppHandle, manager: GlobalSystemMediaTransportControlsSe
         let _ = kind.remove(&manager, *token);
     }
     if !ENABLED.load(Ordering::SeqCst) {
-        let _ = app.emit("media-state", MediaState::idle());
+        emit_state(&app, MediaState::idle());
     }
 }
 
@@ -389,7 +490,6 @@ fn refresh_smtc(
     session_sub: &mut Option<SessionSub>,
     tx: &Sender<()>,
     app: &AppHandle,
-    last_state: &mut Option<String>,
 ) -> Option<String> {
     match manager.GetCurrentSession() {
         Ok(session) => {
@@ -415,12 +515,10 @@ fn refresh_smtc(
     }
 
     let (state, thumb_key) = read_current_session(manager);
-    let key = serde_json::to_string(&state).unwrap_or_default();
-    if last_state.as_deref() != Some(key.as_str()) {
-        *last_state = Some(key);
-        let _ = app.emit("media-state", &state);
-    }
-    if state.active {
+    SMTC_PLAYING.store(state.active && state.playing, Ordering::SeqCst);
+    let was_active = state.active;
+    emit_state(&app, state);
+    if was_active {
         Some(thumb_key)
     } else {
         None
@@ -473,6 +571,7 @@ fn read_current_session(
                 play_enabled: controls.IsPlayEnabled().unwrap_or(true),
                 pause_enabled: controls.IsPauseEnabled().unwrap_or(true),
                 supported: true,
+                fallback: false,
             },
             thumb_key,
         ))
@@ -513,47 +612,66 @@ fn cached_thumbnail(key: &str, load: impl FnOnce() -> String) -> String {
     let result = if let Ok(mut guard) = THUMB_CACHE.lock() {
         match guard.as_mut() {
             Some(entry) if entry.key == key && !entry.confirmed => {
+                entry.last_read_at = std::time::Instant::now();
                 if value.is_empty() {
                     // 空封面：继续重试，达到上限后接受为空
                     entry.empty_tries += 1;
                     if entry.empty_tries >= THUMB_EMPTY_MAX_TRIES {
                         entry.confirmed = true;
-                    } else {
-                        entry.seen_at = std::time::Instant::now();
+                        dlog::write(&format!(
+                            "[audio] thumb confirmed-empty key={key}"
+                        ));
                     }
+                    // 未确认/空值：不返回候选
+                    String::new()
                 } else if entry.value == value {
-                    // 非空候选连续两次一致 → 确认
-                    entry.confirmed = true;
-                    dlog::write(&format!(
-                        "[audio] thumb confirmed key={key} bytes={}",
-                        value.len()
-                    ));
+                    entry.reads += 1;
+                    // 确认条件：至少两次一致，且从切歌起已稳定超过确认窗口。
+                    // 仅“两次一致”不够——应用更新封面是异步的，旧封面可能
+                    // 残留超过一次重读间隔，过早确认会永久错图。
+                    if entry.reads >= 2
+                        && entry.key_at.elapsed() >= Duration::from_millis(THUMB_CONFIRM_MS)
+                    {
+                        entry.confirmed = true;
+                        dlog::write(&format!(
+                            "[audio] thumb confirmed key={key} bytes={}",
+                            value.len()
+                        ));
+                        entry.value.clone()
+                    } else {
+                        // 尚未确认：不展示候选（避免把上一首封面亮出来）
+                        String::new()
+                    }
                 } else {
-                    // 候选变化（上一首封面 → 本首封面）：更新并重新安定计时
+                    // 候选变化（上一首封面 → 本首封面）：更新值并重新计数
                     dlog::write(&format!(
                         "[audio] thumb settled key={key} old_bytes={} new_bytes={}",
                         entry.value.len(),
                         value.len()
                     ));
                     entry.value = value;
+                    entry.reads = 1;
                     entry.empty_tries = 0;
-                    entry.seen_at = std::time::Instant::now();
+                    String::new()
                 }
-                entry.value.clone()
             }
             _ => {
+                // 新键（切歌）或首次读取：先进入候选，不展示，等安定确认
                 *guard = Some(ThumbEntry {
                     key: key.to_string(),
                     value,
                     confirmed: false,
-                    seen_at: std::time::Instant::now(),
+                    key_at: std::time::Instant::now(),
+                    last_read_at: std::time::Instant::now(),
+                    reads: 1,
                     empty_tries: 0,
                 });
-                guard.as_ref().unwrap().value.clone()
+                String::new()
             }
         }
     } else {
-        value
+        // 锁竞争兜底：保守不展示
+        String::new()
     };
     result
 }
@@ -569,7 +687,7 @@ fn thumbnail_refresh_due_for(key: &str) -> bool {
                 } else {
                     THUMB_SETTLE_MS
                 };
-                return entry.seen_at.elapsed() >= Duration::from_millis(delay);
+                return entry.last_read_at.elapsed() >= Duration::from_millis(delay);
             }
         }
     }
@@ -679,6 +797,12 @@ fn wave_loop(app: AppHandle) {
     let mut fmt: Option<AudioFormat> = None;
     // 连续静音计数（每 100ms 一次）；超过阈值释放采集客户端（停止采集，降低开销）
     let mut silent_ticks: u32 = 0;
+    let mut energy_ticks: u32 = 0;
+    let mut fallback_on = false;
+    // loopback 初始化失败计数（节流日志：无音频设备的机器每 500ms 重试一次，
+    // 每次都写日志会刷屏，改为每 ~30s 记一条并带累计次数）
+    let mut init_fail_count: u32 = 0;
+    let mut init_ok_logged = false;
 
     loop {
         std::thread::sleep(Duration::from_millis(if capture.is_none() {
@@ -691,7 +815,11 @@ fn wave_loop(app: AppHandle) {
             break;
         }
         if !ENABLED.load(Ordering::SeqCst) {
-            // 开关关闭：释放客户端，空转等待
+            // 开关关闭：释放客户端并隐藏兜底面板，空转等待
+            if fallback_on {
+                fallback_on = false;
+                emit_state(&app, MediaState::idle());
+            }
             if capture.is_some() {
                 let _ = client.as_ref().map(|c| unsafe { c.Stop() });
                 client = None;
@@ -701,16 +829,34 @@ fn wave_loop(app: AppHandle) {
             continue;
         }
 
+        // SMTC 恢复“正在播放”后，兜底面板立即让位（不主动 emit，SMTC 状态为权威）
+        if fallback_on && SMTC_PLAYING.load(Ordering::SeqCst) {
+            fallback_on = false;
+        }
+
         // 懒初始化 loopback 客户端（首次播放时创建）
         if capture.is_none() {
             match unsafe { init_loopback() } {
                 Ok((c, cap, f)) => {
+                    if !init_ok_logged {
+                        init_ok_logged = true;
+                        dlog::write(&format!(
+                            "[audio] loopback init ok rate={} ch={} bits={} float={}",
+                            f.sample_rate, f.channels, f.bits, f.is_float
+                        ));
+                    }
+                    init_fail_count = 0;
                     client = Some(c);
                     capture = Some(cap);
                     fmt = Some(f);
                 }
                 Err(e) => {
-                    dlog::write(&format!("[audio] loopback init failed: {e}"));
+                    init_fail_count += 1;
+                    if init_fail_count == 1 || init_fail_count % 60 == 0 {
+                        dlog::write(&format!(
+                            "[audio] loopback init failed (x{init_fail_count}): {e}（无音频输出设备 / 设备被独占时属正常）"
+                        ));
+                    }
                     continue;
                 }
             }
@@ -718,24 +864,57 @@ fn wave_loop(app: AppHandle) {
 
         let cap = capture.as_ref().unwrap();
         let f = fmt.as_ref().unwrap();
+        // 默认设备切换（蓝牙/USB DAC/RDP 音频热切换）会报 AUDCLNT_E_DEVICE_INVALIDATED：
+        // 记录后强制重建客户端，否则波形与兜底面板会永久失效直到重开开关。
+        let mut invalidated = false;
         unsafe {
             let mut data: *mut u8 = std::ptr::null_mut();
             let mut frames: u32 = 0;
             let mut flags: u32 = 0;
-            if cap.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_ok()
-                && frames > 0
-                && !data.is_null()
-            {
-                let wave = compute_wave(data, frames as usize, f);
-                let _ = cap.ReleaseBuffer(frames);
-                let has_energy = wave.iter().any(|v| *v > 0.0);
-                if has_energy {
-                    silent_ticks = 0;
-                    let _ = app.emit("audio-wave", wave);
-                } else {
-                    silent_ticks += 1;
+            match cap.GetBuffer(&mut data, &mut frames, &mut flags, None, None) {
+                Ok(()) if frames > 0 && !data.is_null() => {
+                    let wave = compute_wave(data, frames as usize, f);
+                    let _ = cap.ReleaseBuffer(frames);
+                    let has_energy = wave.iter().any(|v| *v > 0.0);
+                    if has_energy {
+                        silent_ticks = 0;
+                        energy_ticks += 1;
+                        let _ = app.emit("audio-wave", wave);
+                        // WASAPI 兜底：SMTC 无正在播放会话但系统确在出声（≥2 秒），
+                        // 显示通用媒体面板（波形 + “正在播放音频”），让 SMTC 失效 /
+                        // 播放器未注册媒体会话的机器也能用音频识别。
+                        if !fallback_on
+                            && !SMTC_PLAYING.load(Ordering::SeqCst)
+                            && (energy_ticks as u64) * WAVE_POLL_MS >= FALLBACK_ARM_MS
+                        {
+                            fallback_on = true;
+                            dlog::write("[audio] wasapi fallback panel armed (SMTC 无正在播放会话)");
+                            emit_state(&app, fallback_state());
+                        }
+                    } else {
+                        silent_ticks += 1;
+                        energy_ticks = 0;
+                        // 声音停止约 1 秒后隐藏兜底面板
+                        if fallback_on && (silent_ticks as u64) * WAVE_POLL_MS >= FALLBACK_HIDE_MS {
+                            fallback_on = false;
+                            dlog::write("[audio] wasapi fallback panel hidden (声音停止)");
+                            emit_state(&app, MediaState::idle());
+                        }
+                    }
+                }
+                Ok(()) => {}
+                Err(e) => {
+                    dlog::write(&format!("[audio] loopback GetBuffer failed: {e}"));
+                    invalidated = true;
                 }
             }
+        }
+        if invalidated {
+            let _ = client.as_ref().map(|c| unsafe { c.Stop() });
+            client = None;
+            capture = None;
+            fmt = None;
+            silent_ticks = 0;
         }
         // 连续静音约 2 秒：释放采集客户端（停止采集），等有声音再重建
         if silent_ticks >= 20 && capture.is_some() {
@@ -803,7 +982,10 @@ fn parse_format(fmt: &WAVEFORMATEX) -> AudioFormat {
     } else if fmt.wFormatTag == WAVE_FORMAT_EXTENSIBLE && fmt.cbSize as usize >= 22 {
         // WAVEFORMATEXTENSIBLE 布局：WAVEFORMATEX（18 字节）+ Samples(2) + dwChannelMask(4) + SubFormat(16)
         let ptr = fmt as *const WAVEFORMATEX as *const u8;
-        let sub = unsafe { *(ptr.add(24) as *const windows::core::GUID) };
+        // read_unaligned：GetMixFormat 返回的缓冲区不保证 4 字节对齐（实测为
+        // 2 字节对齐），偏移 24 处直接解引用 GUID 会触发 misaligned pointer
+        // dereference（debug 构建 panic / release 未定义行为）。
+        let sub = unsafe { std::ptr::read_unaligned(ptr.add(24) as *const windows::core::GUID) };
         sub == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
     } else {
         false
@@ -820,6 +1002,51 @@ fn parse_format(fmt: &WAVEFORMATEX) -> AudioFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 封面缓存：切歌瞬间读到旧封面时，未确认期间不展示，稳定超过确认窗口才展示
+    #[test]
+    fn thumb_cache_stale_cover_not_shown_until_confirmed() {
+        *THUMB_CACHE.lock().unwrap() = None;
+
+        // 切歌瞬间：SMTC 缩略图仍是上一首 → 返回旧封面作为候选
+        let r1 = cached_thumbnail("songB", || "OLD_COVER".to_string());
+        assert_eq!(r1, "", "未确认候选不应展示");
+
+        // 400ms 后重读，仍是旧封面：不足确认窗口 → 不展示
+        {
+            let mut g = THUMB_CACHE.lock().unwrap();
+            let e = g.as_mut().unwrap();
+            e.last_read_at = std::time::Instant::now() - Duration::from_millis(400);
+            e.key_at = std::time::Instant::now() - Duration::from_millis(400);
+        }
+        let r2 = cached_thumbnail("songB", || "OLD_COVER".to_string());
+        assert_eq!(r2, "", "旧封面稳定不足确认窗口，不应展示");
+
+        // 1500ms 后：应用已更新为新封面 → 值变化 → 进入新候选，仍不展示
+        {
+            let mut g = THUMB_CACHE.lock().unwrap();
+            let e = g.as_mut().unwrap();
+            e.last_read_at = std::time::Instant::now() - Duration::from_millis(400);
+            e.key_at = std::time::Instant::now() - Duration::from_millis(1500);
+        }
+        let r3 = cached_thumbnail("songB", || "NEW_COVER".to_string());
+        assert_eq!(r3, "", "新封面首次出现尚未确认");
+
+        // 再次一致读取 → 确认并展示新封面
+        {
+            let mut g = THUMB_CACHE.lock().unwrap();
+            let e = g.as_mut().unwrap();
+            e.last_read_at = std::time::Instant::now() - Duration::from_millis(400);
+        }
+        let r4 = cached_thumbnail("songB", || "NEW_COVER".to_string());
+        assert_eq!(r4, "NEW_COVER", "稳定后应确认并展示新封面");
+
+        // 已确认：直接返回缓存，不再触发加载
+        let r5 = cached_thumbnail("songB", || panic!("不应再次加载").to_string());
+        assert_eq!(r5, "NEW_COVER");
+
+        *THUMB_CACHE.lock().unwrap() = None;
+    }
 
     #[test]
     fn parse_format_detects_float() {
@@ -858,10 +1085,20 @@ fn compute_wave(data: *const u8, frames: usize, fmt: &AudioFormat) -> Vec<f32> {
         for ch in 0..channels {
             let off = base + ch * bytes_per_sample;
             if is_float && bytes_per_sample >= 4 {
-                let v = unsafe { *(data.add(off) as *const f32) };
+                // 用 read_unaligned：WASAPI 环路缓冲不保证 4 字节对齐，直接
+                // 解引用 f32 在 debug 构建会触发 misaligned pointer dereference
+                // panic（整个进程 abort），release 下则是未定义行为，可能让
+                // 波形能量检测失效（表现为“音频识别无反应”）。
+                let v = unsafe { std::ptr::read_unaligned(data.add(off) as *const f32) };
+                sum += v;
+            } else if bytes_per_sample >= 4 {
+                // 32 位整数 PCM：常见于 WASAPI 混合格式（实测本机 48kHz/2ch/32bit）。
+                // 此前会落入 i16 分支只读低 16 位，导致部分音源能量检测失真/失效。
+                let v = unsafe { std::ptr::read_unaligned(data.add(off) as *const i32) } as f32
+                    / 2147483648.0;
                 sum += v;
             } else if bytes_per_sample >= 2 {
-                let v = unsafe { *(data.add(off) as *const i16) } as f32 / 32768.0;
+                let v = unsafe { std::ptr::read_unaligned(data.add(off) as *const i16) } as f32 / 32768.0;
                 sum += v;
             } else {
                 // 8 位无符号

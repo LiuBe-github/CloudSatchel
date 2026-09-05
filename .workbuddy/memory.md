@@ -7,7 +7,7 @@
 - 当前版本：v1.0.0
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.25）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.28）
 
 ## 已实现功能
 
@@ -31,6 +31,132 @@
 - **音频面板音量调节条（v0.20.0）：面板内系统音量滑块 + 静音开关**
 
 ## 最近完成
+
+- 2026-09-XX v1.0.1 跨机器兼容性加固 + AI 回复 Markdown 渲染（构建中）
+  - 背景：用户实测 v1.0.0 修复包后，**音频识别 / 任务栏透明 / 鼠标选取翻译**三功能
+    在其他机器上仍然「开关无反应/无效果」（多台机器、Windows 版本不确定）
+  - 代码审查（子代理）核心结论：
+    ① 任务栏透明 + 音频面板被「全屏抑制链」可能联手打死——远程桌面（mstsc/
+    向日葵/ToDesk）全屏窗口几何覆盖显示器、无 TOOLWINDOW、不在 SystemApps →
+    any_fullscreen 恒 true → desired_taskbar_visual 恒 false；测试者把云笈自身
+    最大化置前台也会触发（by design）；② media-state 是边沿事件，辅助窗口 WebView
+    冷启动数秒会错过首次事件且永不重发（慢机器必现）；③ 翻译疑似提权/UIPI——
+    安装后首次启动继承 NSIS 提权 token 或右键管理员运行时，WH_MOUSE_LL 钩子
+    收不到普通权限应用输入；④ audio::control 线程无 COM 初始化（媒体控制按钮
+    可能从未生效过）；wave_loop 对 GetBuffer 错误静默且不重建客户端（设备热切换
+    后波形永久死）；Win10 Accent 无周期重放（Explorer 重启后透明丢失）
+  - 本轮修复（v1.0.1）：
+    - **fullscreen.rs**：新增 DWM cloaked 窗口排除（挂起 UWP 常驻整屏隐形窗口，
+      IsWindowVisible 仍 true——坏机器 any_fullscreen 恒真的主要嫌疑）；
+      `fullscreen_culprits()` 诊断函数（全屏翻转时记录肇事窗口 class/title/pid/exe）
+    - **audio.rs**：MEDIA_STATE 静态缓存 + `get_media_state` 命令（面板挂载时
+      主动查询，修复边沿事件被冷启动丢弃）；emit 统一走 emit_state（去重+日志）；
+      control() 补 COM 初始化（MTA）；GetBuffer 报错强制重建客户端；loopback
+      init 失败日志节流（每 ~30s）+ init ok 记格式（rate/ch/bits/float）
+    - **lib.rs**：启动环境基线日志（OS build/是否提权/LOCALAPPDATA）；
+      AppState 新增 elevated 字段（快照带出，前端弹一次提示）；
+      poll_loop 全屏翻转时发 state-updated（修复任务栏透明关闭时音频面板全屏状态
+      永不刷新的耦合 bug）+ 肇事窗口日志；注册 get_media_state/open_url 命令
+    - **taskbar.rs**：os_build_number() 公开 + set_transparent 记分支与 build 号；
+      reapply_accent()（Win10 Accent 周期重放，poll_loop 每 ~2.6s 调用）
+    - **taskbar_engine.rs**：存活校验后加注入探针（%TEMP%\TranslucentTB\
+      ExplorerTAP.dll 是否被引擎复制，t+1s/t+3s 两查）；引擎秒退退出码翻译人话
+      （0xC0000135 缺 DLL 等）
+    - **translate.rs**：检测链分级日志（UIA CoCreateInstance HRESULT / 无
+      TextPattern 时记录前台窗口 class+pid / 选区为空 / MouseUp 5s 节流）
+    - **dlog.rs**：日志加时间戳前缀（取证时间线）
+    - **AI 回复 Markdown 渲染**：ui/src/lib/markdown.tsx 零依赖自写渲染器
+      （标题/列表/表格/引用/围栏代码块带复制/行内代码/粗斜删/链接图片），
+      AiPanel/AiPopup 助手气泡改用 <Markdown>；链接点击走新命令 open_url
+      （Rust ShellExecuteW，仅 http/https）；主题样式用 :root 既有变量
+  - 取证流程（用户侧）：坏机器装 v1.0.1 → 依次开三个开关+播放音乐+选一段文本+
+    切最大化 → 回传 %LOCALAPPDATA%\CloudSatchel\hooks-debug.log。日志关键词：
+    `[APP] env`（build/提权）、`[poll_loop] fullscreen culprits`（谁在“全屏”）、
+    `[audio] media-state / loopback`、`[taskbar] engine spawned/alive/tap probe`、
+    `[translate] hook installed / mouseup / no TextPattern`
+  - 待办：构建完成后实测（本机）+ 用户坏机器取证后按日志定向修复
+
+- 2026-08-31 v1.0.0 正式版跨机器 bug 修复（用户在其他电脑实测：音频识别无反应 + 任务栏透明失效）
+  - **音频识别**：SMTC 失效/无会话机器上改用 WASAPI 环路能量兜底——只要系统确在出声
+    （连续 ≥2 秒），就显示通用媒体面板「正在播放音频 + 波形」，不再依赖 SMTC；
+    停止约 1 秒后自动隐藏；SMTC 恢复「正在播放」时立即让位（SMTC 状态为权威）。
+    另加无会话时 5 秒低频兜底轮询（事件订阅失效如 System Events Broker 被禁用时
+    也能发现新播放；有会话仍纯事件驱动，不增加 CPU）。
+  - **波形采样 UB 修复（关键，可能正是“音频识别无反应”根因）**：
+    ① parse_format 从 GetMixFormat 缓冲区偏移 24 读 GUID 用了直接解引用——缓冲区
+    实测 2 字节对齐，debug 构建直接 misaligned pointer dereference panic（0xc0000409
+    崩掉整个进程），release 为未定义行为；改 std::ptr::read_unaligned。
+    ② compute_wave 读 f32 样本同样未对齐，改 read_unaligned。
+    ③ 本机混合格式是 32 位整数 PCM（48kHz/2ch/32bit），此前落入 i16 分支只读低
+    16 位导致能量检测失真；新增 i32 分支（/ 2^31）。
+  - **任务栏透明**：TranslucentTB 引擎 start() 只检查 spawn 成功，进程秒退时误报
+    成功（开关亮着但无效果）。新增 1 秒后存活校验：进程立即退出则读退出码记日志、
+    返回失败 → 回滚开关 + 前端 toast「任务栏透明开启失败」；Win10 Accent 路径也
+    增加“是否有任务栏窗口接受”校验（之前无条件返回 true）。
+  - 前端：MediaState 新增 fallback 字段，兜底面板副标题显示「系统音频 · 未识别到
+    媒体信息」；bridge 新增 taskbar-transparent-failed 事件监听。
+  - 验证：debug/release 均端到端通过（正弦波播放 → 面板显示 → 停止 → 隐藏）；
+    cargo check/test 通过；引擎存活校验日志 [taskbar] engine alive 通过。
+  - 状态：新安装包已构建待用户测试；测试通过后重新推送 + 发布 v1.0.0（旧 tag/release
+    需删除重建，commit 109304b 已发布过 v1.0.0）
+
+- 2026-08-31 v1.0.0 任务栏透明“全屏退出不恢复”修复（用户复测）
+  - 现象：启动时透明正常 → 应用全屏/最大化变不透明 → 最小化或取消最大化后任务栏
+    不再恢复透明（开关仍为开、引擎已停且不再重启）
+  - 根因：`any_fullscreen_now()` 把系统输入体验窗口误判为全屏——Windows 11 的
+    TextInputHost.exe（SystemApps 下的「Windows 输入体验」）常驻一个覆盖整个
+    显示器的 Windows.UI.Core.CoreWindow，几何上 100% 覆盖 → ANY_FULLSCREEN 永久
+    true → desired_taskbar_visual 恒为 false → 全屏退出后 sync_taskbar 早退，引擎
+    永不重启。本机实测用 C# EnumWindows 探针定位到该窗口（cls=Windows.UI.Core.
+    CoreWindow title=Windows 输入体验 pid=TextInputHost）
+  - 修复（fullscreen.rs）：
+    ① 跳过 SystemApps 目录进程的窗口（is_system_app_window：GetWindowThreadProcessId
+      → OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) → QueryFullProcessImageNameW
+      → 路径前缀 %WINDIR%\SystemApps，大小写不敏感；只在几何已是全屏时才查进程，
+      避免每 320ms 对全部窗口 OpenProcess）
+    ② 真全屏判据加强：面积比 ≥97% 之外再加“覆盖显示器四边”（容差 8px 与边长
+      0.5% 取大）——最大化窗口必留任务栏条带、至少一条边不覆盖，任务栏较薄/
+      自动隐藏/多显示器下不再误判为全屏
+    ③ any_fullscreen_now / is_fullscreen_now 跳过 IsIconic 最小化窗口
+  - 验证（debug + release）：启动即透明（输入体验窗口存在也不误判）→ 全屏窗口
+    出现引擎停止 → 最小化/关闭后引擎重启恢复透明；cargo check/test 通过
+
+- 2026-08-31 v1.0.0 音频识别开启即闪退（0xc0000409）根因与修复（重要）
+  - 现象：只要音频识别开启（面板弹出/前台短暂聚焦）就闪退；本地开发路径测试正常，
+    安装版（D:\Program Files\云笈\）必现
+  - 定位：release panic=abort，任何 panic 都是 0xc0000409；给应用加了全局 panic 钩子
+    （lib.rs install_panic_hook + dlog::write_panic，abort 前把消息+文件行号写日志），
+    用户复现后日志得到：`[panic] end byte index 21 is not a char boundary; it is
+    inside '测' ... at src\fullscreen.rs:165:44`
+  - 根因：fullscreen.rs is_system_app_window 判断路径前缀用了字节切片
+    `path[..sysapps.len()]`（sysapps="C:\Windows\SystemApps" 共 21 字节）；当被检查
+    窗口的进程路径含非 ASCII（如安装目录「云笈」= 每汉字 3 字节），21 字节处正好落在
+    多字节字符中间 → panic。触发路径：音频面板出现时 wry 样式复位使其短暂成为前台
+    → is_fullscreen_now（每 320ms）对它调 is_system_app_window → 进程路径含中文 → panic
+  - 修复：① 路径前缀比较改用 `path.to_lowercase().starts_with(&sysapps.to_lowercase())`
+    （字符安全，不再按字节切片）；② is_fullscreen_now 增加工具窗口跳过（音频面板/
+    AI 小窗/翻译窗是 WS_EX_TOOLWINDOW，不可能全屏，也无需做进程检查）
+  - 验证：修复前用中文路径副本复现并确认 panic 日志；修复后同场景 20s+ 播放不再崩溃、
+    无 [panic] 日志；全屏进出任务栏回归通过（启动透明→全屏不透明→退出恢复）
+  - 教训：**Windows 路径拼接/前缀判断禁止按字节切片**（路径可含中文等非 ASCII，
+    且字节长度边界可能落在多字节字符中间，直接 panic）；一律用 starts_with/ends_with
+    或 to_lowercase 后比较。panic 钩子（[panic] 日志）保留在最终版，便于后续远程定位
+
+- 2026-08-31 v1.0.0 音频封面仍显示上一首（封面缓存确认过急）修复
+  - 现象：切歌后新歌封面区域显示上一首的封面
+  - 根因：v0.19.2 的两段式缓存「候选→连续两次一致→确认」在应用更新 SMTC 缩略图
+    慢于两次重读间隔（400ms）时，会把残留的旧封面误判为“一致”并永久确认；
+    且未确认的候选值会直接返回给 UI 展示（错图至少会闪现/持续）
+  - 修复（audio.rs cached_thumbnail/ThumbEntry）：
+    ① **未确认的候选不再返回给 UI**（返回空串→前端占位图标），确认后才展示封面；
+    ② 确认条件改为「连续 ≥2 次读取一致」且「从切歌（key_at）起稳定 ≥ THUMB_CONFIRM_MS
+      (1500ms)」，旧封面要残留超过 1.5s 才会被误确认（实际应用更新一般 <500ms）；
+    ③ ThumbEntry 增加 key_at / last_read_at / reads 字段，重读间隔用 last_read_at
+      控制（避免确认窗口内每 200ms tick 都重读）
+  - 新增单元测试 thumb_cache_stale_cover_not_shown_until_confirmed：模拟切歌瞬间
+    读到旧封面→不展示→值变化→再稳定→确认展示，全过（cargo test 7 个全过）
+  - 验证：真实 Apple Music 会话下封面正常确认（[audio] thumb confirmed 日志），
+    无崩溃；安装包已重建
 
 - 2026-08-30 v1.0.0 首个正式版：设置项间距修复 + 版本号正式升 1.0.0
   - 用户反馈设置项之间元素重叠/拥挤（删除灰色说明后行距不足）：CSS 新增
@@ -392,6 +518,12 @@
 - 辅助窗口（ai-popup / audio-panel）：关闭=隐藏不销毁；前端 window 操作需在 capabilities 配置权限；on_window_event 按 label 分支
 - 多窗口路由：main.tsx 按 getCurrentWindow().label 渲染 App / AiPopup / AudioPanel
 - Release 资产统一英文名：`CloudSatchel_<版本>_x64-setup.exe`
+- **改动代码后的默认动作（2026-09-05 用户新约定，最高优先级）**：
+  - 默认**只更新本地测试版**：`npm run tauri build -- --no-bundle` → 更新
+    `src-tauri/target/release/CloudSatchel.exe` 与根目录测试副本 `CloudSatchel.exe`，
+    交付前确认时间戳已刷新；构建前先关掉运行中的 CloudSatchel 实例（防 os error 5）。
+  - **没有用户明确指示：不打包安装包、不 git push、不 tag、不建 Release**。
+    用户说「打包」才 `npm run release`；用户说「推送」才 commit/push/tag/release。
 
 ## 待办 / 可继续方向
 
@@ -401,20 +533,28 @@
 - 需求文档第 10 节迭代建议剩余项：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化与导出 / 音频面板音量歌词
 - 后续版本继续同步 Cargo、Tauri、前端 package 和 About 版本号
 
-## 会话交接状态（2026-08-18 更新，供新会话"读取记忆"恢复上下文）
+## 会话交接状态（2026-09 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新代码：v1.0.0（首个正式版：设置项间距修复，2026-08-30，本地未提交）
-- 已发布线：v0.7.x ~ v0.16.15 历史 + v0.17.0（GitHub Releases 仅保留 v0.17.0；git tag 完整保留）
-- 本地未推送：v0.18.0 ~ v0.20.1（构建产物与安装包待用户确认后发版）
-- git 状态：main 与远端同步至 `af0cda4`（v0.19.0 README）；v0.19.1 起的全部改动未提交
-- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度
+- 最新代码：v1.0.1（跨机器兼容性加固 + AI Markdown 渲染；本地测试版与安装包均已构建）
+- 已发布线：v0.7.x ~ v0.20.11 历史 + v1.0.0（commit `109304b`，tag v1.0.0）
+- 待办：**等用户明确指示再推送/打包**（2026-09-05 新约定：不打包、不推送是默认）。
+  用户坏机器取证（音频/任务栏/翻译三功能），按 hooks-debug.log 定向修复
+- git 状态：main 与远端同步至 `109304b`（v1.0.0）；v1.0.0 bugfix + v1.0.1 改动均未提交
+- 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度 → v1.0.0 正式版 → v1.0.1 兼容性加固+AI Markdown
 
 **需求文档当前状态**
-- `CloudSatchel需求文档.md`（根目录，v1.25）：FR-01~FR-13、FR-15、FR-17、FR-18、FR-19 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别与鼠标选取翻译均为主界面功能列表项
+- `CloudSatchel需求文档.md`（根目录，v1.28）：FR-01~FR-13、FR-15、FR-17、FR-18、FR-19 全部已实现；FR-16 虚拟桌宠已移除（v0.17.0）；音频识别与鼠标选取翻译均为主界面功能列表项
 - 文档第 10 节迭代建议中**未实现**：设置引导 / 日志开关 / 背景图缓存 / Win 版本能力说明 / 冒烟强化 / 隐私恢复托盘气泡 / AI 对话持久化导出 / 音频面板扩展
 
 **待用户验证事项**
+- v1.0.1（新包）：坏机器上依次 ① 开任务栏透明 ② 播放任意音乐等音频面板 ③ 在
+  文本/网页里选一段文字看翻译按钮；任一失败 → 回传 `%LOCALAPPDATA%\CloudSatchel\
+  hooks-debug.log`（现带时间戳）。日志要点：`[APP] env build=... elevated=...`、
+  `[poll_loop] fullscreen culprits: cls=... exe=...`（若是 mstsc/向日葵/云笈自身→
+  实锤全屏抑制）、`[audio] loopback init ok/failed`、`[taskbar] engine spawned/alive/
+  tap probe`、`[translate] hook installed / no TextPattern selection: fg_class=...`。
+  另确认：AI 助手与小窗回复已按 Markdown 渲染、链接可点开、代码块可复制。
 - v0.12.1 TranslucentTB 弹窗修复：需在出问题的那台机器上验证（反复开关透明任务栏不再弹"请重启 Windows"）
 - v0.13.0+ 老板键 / AI 小窗 / 音频识别：自动化已覆盖核心链路，真实桌面体验待用户确认
   - AI 小窗对话（需配置 Key）与音频面板控制（真实播放器 SMTC 控制按钮）
@@ -433,6 +573,10 @@
 - settings.json 读取代容忍 UTF-8 BOM；前端 build 在沙箱需 danger-full-access（Node 子进程 EPERM）
 - Tauri 2 ACL：前端 window 操作（show/hide/setPosition）需 app.security.capabilities 配置 core:window:allow-*；core:window:default 只含只读查询；每个辅助窗口都要列入 windows 列表
 - WASAPI loopback：GetMixFormat 的 WAVEFORMATEXTENSIBLE 必须完整复制（头部+cbSize）再 Initialize，否则 E_INVALIDARG；波形采集以能量驱动（不依赖 SMTC playing，SoundPlayer 等不注册 SMTC 也能出波形）
+- **WASAPI 采样解析对齐坑（v1.0.0 修复）**：GetMixFormat 缓冲区与环路捕获缓冲都不保证 4 字节对齐（实测 2 字节对齐），
+  parse_format 读 SubFormat GUID 与 compute_wave 读 f32/i32 样本必须用 std::ptr::read_unaligned，直接解引用在 debug 构建会
+  misaligned pointer dereference panic（0xc0000409 崩整个进程）、release 为 UB；且 32 位整数 PCM 需单独 i32 分支
+  （否则落入 i16 只读低 16 位，能量检测失真，表现为“音频识别无反应”）
 - SMTC：PlaybackStatus 在 PlaybackInfo 上；IsNextEnabled/IsPlayEnabled 等在 playback.Controls() 上；GetCurrentSession 无会话返回 Err；需要 windows crate features Media_Control/Media_MediaProperties/Foundation；SourceAppUserModelId 是 AUMID（用 AppInfo::GetFromAppUserModelId 查显示名，feature ApplicationModel）
 - 透明窗口 + backdrop-filter：WebView2 模糊不了窗口外内容，会在面板矩形边缘产生「虚框」伪影 → 辅助窗口一律不用 backdrop-filter，用高不透明度背景 + 阴影（阴影需窗口比面板大，面板留边距）
 - 透明辅助窗口「虚框」终案：SetWindowRgn 圆角裁剪窗口区域 + shadow:false + 无 border/外阴影（见 v0.16.2）
@@ -444,4 +588,7 @@
 
 **新会话快速恢复**
 1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`
-2. 即可继续开发/修 bug；发布流程：`npm run release`（一键构建+重命名安装包）→ git tag/push → gh release create（GH_TOKEN 从 `git credential fill` 提取）
+2. 即可继续开发/修 bug；**默认动作（2026-09-05 用户约定）：改代码后只更新本地测试版**
+   （`npm run tauri build -- --no-bundle`）；打包安装包 / git push / tag / Release 必须等
+   用户明确指示（打包=`npm run release`；推送=commit/push/tag + gh release create，
+   GH_TOKEN 从 `git credential fill` 提取）。

@@ -72,6 +72,7 @@ pub(crate) struct AppState {
     translate_ms_region: Mutex<String>,  // 微软翻译区域（Region）
     translate_target_lang: Mutex<String>, // 翻译目标语言（默认 auto-zh-Hans）
     translate_source_lang: Mutex<String>, // 翻译源语言（默认 auto：自动检测）
+    elevated: bool,                      // 进程是否以管理员权限运行（启动时探测，UIPI 提示用）
 }
 
 impl Default for AppState {
@@ -111,6 +112,7 @@ impl Default for AppState {
             translate_ms_region: Mutex::new(String::new()),
             translate_target_lang: Mutex::new("auto-zh-Hans".to_string()),
             translate_source_lang: Mutex::new("auto".to_string()),
+            elevated: false,
         }
     }
 }
@@ -150,6 +152,7 @@ struct Snapshot {
     translate_target_lang: String,
     translate_source_lang: String,
     translate_has_ms_key: bool,
+    elevated: bool,
     background_image_path: String,
     background_fit: String,
     background_dim: f64,
@@ -194,6 +197,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         translate_target_lang: state.translate_target_lang.lock().unwrap().clone(),
         translate_source_lang: state.translate_source_lang.lock().unwrap().clone(),
         translate_has_ms_key: ai::has_encrypted_key(translate::MS_KEY_FILE),
+        elevated: state.elevated,
         background_image_path: bg.image_path.clone(),
         background_fit: bg.fit.clone(),
         background_dim: bg.dim,
@@ -299,6 +303,7 @@ fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
             // 开启透明失败（例如引擎启动失败）：回滚用户开关，让前端状态与真实一致
             *state2.taskbar_transparent.lock().unwrap() = false;
             persist(&state2);
+            let _ = app2.emit("taskbar-transparent-failed", ());
         }
         let _ = app2.emit("state-updated", snapshot(&state2));
     });
@@ -1320,6 +1325,71 @@ fn quit_app(app: AppHandle) {
     cleanup_and_quit(&app);
 }
 
+/// 读取当前媒体状态（音频面板 WebView 冷启动时可能错过 media-state 事件，
+/// 前端挂载后主动查询一次，修复慢机器上面板不显示的竞态）
+#[tauri::command]
+fn get_media_state() -> audio::MediaState {
+    audio::get_current_state()
+}
+
+/// 当前进程是否以管理员权限运行。
+/// 提权进程的 WH_MOUSE_LL 钩子按 UIPI 收不到普通权限应用的鼠标事件，
+/// 表现为「鼠标选取翻译 / 双击隐藏桌面图标」在坏机器上无反应。
+fn is_elevated() -> bool {
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::{
+            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        };
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut token: *mut core::ffi::c_void = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elev = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            std::ptr::null_mut(),
+        );
+        CloseHandle(token);
+        ok != 0 && elev.TokenIsElevated != 0
+    }
+}
+
+/// 用系统默认浏览器打开外部链接（AI 回复 Markdown 中的链接）。
+/// 仅允许 http/https，防止 Markdown 内容诱导执行任意协议。
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("仅支持打开 http/https 链接".to_string());
+    }
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = OsStr::new(trimmed)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let result = windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        );
+        if (result as isize) <= 32 {
+            return Err(format!("打开链接失败（错误码 {}）", result as isize));
+        }
+    }
+    Ok(())
+}
+
 /// 执行一次桌面双击切换（由轮询线程调用；动画结束后也会再次调用以执行排队的请求）
 ///
 /// 关键设计：每次物理双击都必须对应一次切换。
@@ -1453,8 +1523,27 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
                     fg_maximized,
                     any_fullscreen
                 ));
+                // 肇事窗口实名化：任务栏透明/音频面板被全屏抑制时，日志里直接
+                // 看到是哪个窗口在覆盖显示器（远程桌面 mstsc、云笈自身最大化、
+                // 还是 OEM 覆盖层），无需再猜。
+                if fullscreen || any_fullscreen {
+                    dlog::write(&format!(
+                        "[poll_loop] fullscreen culprits: {}",
+                        fullscreen::fullscreen_culprits()
+                    ));
+                }
+                // 无论任务栏透明是否开启，全屏状态变化都要推给前端：
+                // 音频面板的“全屏隐藏”依赖快照 fullscreenActive，之前只有任务栏
+                // 状态变化才发 state-updated，导致面板的全屏状态长期陈旧。
+                let _ = app.emit("state-updated", snapshot(&state));
                 sync_taskbar(&app, &state);
             }
+        }
+        // 每约 2.6s（32 个 80ms 周期）：Win10 Accent 透明周期重放。
+        // Explorer 重启 / 主题切换 / 其他程序重设 Accent 会让透明静默丢失而
+        // 开关仍亮着——重放是幂等的，Win11 分支内部直接返回。
+        if tick % 32 == 0 && *state.taskbar_applied.lock().unwrap() {
+            taskbar::reapply_accent();
         }
     }
 }
@@ -1463,15 +1552,56 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
 // 生命周期
 // ---------------------------------------------------------------------------
 
+/// 安装全局 panic 钩子：把 panic 消息与位置写入调试日志。
+/// release 配置 panic=abort，进程会闪退，但钩子会在 abort 前执行，
+/// 因此闪退后日志里能看到根因（文件:行:列），无需调试器。
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_default();
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        };
+        crate::dlog::write_panic(&format!("[panic] {msg} at {loc}"));
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_hook();
     dlog::write("[APP] CloudSatchel start");
+    {
+        // 环境基线日志（坏机器取证第一行）：OS build 号决定任务栏分支；
+        // 是否提权决定 WH_MOUSE_LL 钩子能否收到普通权限应用输入（UIPI）。
+        let build = taskbar::os_build_number();
+        let elevated = is_elevated();
+        dlog::write(&format!(
+            "[APP] env build={build} win11={} elevated={elevated} localappdata={}",
+            taskbar::is_windows_11(),
+            std::env::var("LOCALAPPDATA").unwrap_or_default()
+        ));
+        if elevated {
+            dlog::write(
+                "[APP] WARNING 以管理员身份运行：UIPI 会屏蔽普通权限应用的输入事件，\
+                 鼠标选取翻译 / 双击隐藏桌面图标可能失效；建议以普通权限运行",
+            );
+        }
+    }
     if is_already_running() {
         activate_existing_window();
         return;
     }
 
-    let state = std::sync::Arc::new(AppState::default());
+    let state = std::sync::Arc::new(AppState {
+        elevated: is_elevated(),
+        ..AppState::default()
+    });
     // 恢复上次退出前的开关与设置（settings.json）
     let prefs = prefs::load();
     *state.enabled.lock().unwrap() = prefs.enabled;
@@ -1557,7 +1687,9 @@ pub fn run() {
             toggle_maximize_window,
             close_window,
             hide_to_tray,
-            quit_app
+            quit_app,
+            open_url,
+            get_media_state
         ])
         .setup(move |app| {
             // 系统托盘（后台驻留入口 + 功能快捷开关）

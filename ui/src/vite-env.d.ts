@@ -42,6 +42,7 @@ export interface AppState {
   translateTargetLang: string; // 翻译目标语言（默认 auto-zh-Hans：自动识别 → 简体中文）
   translateSourceLang: string; // 翻译源语言（默认 auto：自动检测）
   translateHasMsKey: boolean; // 是否已配置微软翻译 Key（DPAPI 加密文件存在）
+  elevated: boolean; // 是否以管理员权限运行（UIPI 提示用）
   fullscreenActive: boolean; // 当前是否有全屏应用（面板/任务栏叠加用）
   theme: ThemeMode;
   animating: boolean;
@@ -83,6 +84,7 @@ export interface MediaState {
   playEnabled: boolean;
   pauseEnabled: boolean;
   supported: boolean;
+  fallback: boolean;
 }
 
 export interface CpuMetrics {

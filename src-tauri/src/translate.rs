@@ -35,10 +35,10 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowRect,
-    GetWindowThreadProcessId, IsWindowVisible, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_QUIT,
-    MSG, MSLLHOOKSTRUCT,
+    CallNextHookEx, DispatchMessageW, GetClassNameW, GetForegroundWindow, GetMessageW,
+    GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, PostThreadMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_QUIT, MSG, MSLLHOOKSTRUCT,
 };
 
 use crate::dlog;
@@ -204,6 +204,8 @@ fn hook_thread() {
 
 fn worker_thread(rx: mpsc::Receiver<HookMsg>) {
     let need_uninit = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() };
+    // MouseUp 检测链日志节流：选区操作高频，最多每 5 秒记一条“收到抬起”
+    let mut last_mouseup_log = std::time::Instant::now() - std::time::Duration::from_secs(60);
     loop {
         match rx.recv() {
             Ok(HookMsg::MouseUp(pt)) => {
@@ -213,6 +215,10 @@ fn worker_thread(rx: mpsc::Receiver<HookMsg>) {
                 std::thread::sleep(std::time::Duration::from_millis(SELECT_SETTLE_MS));
                 if !ENABLED.load(Ordering::SeqCst) {
                     continue;
+                }
+                if last_mouseup_log.elapsed() >= std::time::Duration::from_secs(5) {
+                    dlog::write(&format!("[translate] mouseup@({},{}) detecting", pt.x, pt.y));
+                    last_mouseup_log = std::time::Instant::now();
                 }
                 let Some(app) = APP.get() else { continue };
                 // 前台是自己的窗口 → 不检测
@@ -246,10 +252,32 @@ fn worker_thread(rx: mpsc::Receiver<HookMsg>) {
     dlog::write("[translate] worker exit");
 }
 
+/// 前台窗口诊断信息（检测失败时写日志：远程桌面客户端 / 无 TextPattern 的
+/// 应用在这里暴露，用于坏机器取证）
+fn fg_diag() -> String {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return "fg=none".to_string();
+        }
+        let mut cls = [0u16; 128];
+        let n = GetClassNameW(hwnd, cls.as_mut_ptr(), 128);
+        let class = String::from_utf16_lossy(&cls[..(n.max(0) as usize).min(128)]);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        format!("fg_class={class} fg_pid={pid}")
+    }
+}
+
 /// 通过 UI Automation 读取前台窗口的选中文本与选区位置
 fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> {
-    let automation: IUIAutomation =
-        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok()?;
+    let automation: IUIAutomation = match unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) } {
+        Ok(a) => a,
+        Err(e) => {
+            dlog::write(&format!("[translate] UIA CoCreateInstance failed: {e}; {}", fg_diag()));
+            return None;
+        }
+    };
 
     // 优先取焦点元素；失败时用鼠标位置处的元素
     let mut element = unsafe { automation.GetFocusedElement() }.ok();
@@ -261,11 +289,15 @@ fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> 
     // 沿祖先链向上找支持 TextPattern 的元素（浏览器等选中文本常挂在父级文档元素上）
     let mut cur = element.clone();
     let mut range = None;
+    let mut found_class: Option<String> = None;
     for _ in 0..10 {
         let Some(el) = cur else { break };
         if let Ok(pattern) =
             unsafe { el.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }
         {
+            if let Ok(cls) = unsafe { el.CurrentClassName() } {
+                found_class = Some(cls.to_string());
+            }
             if let Ok(sel) = unsafe { pattern.GetSelection() } {
                 if let Ok(len) = unsafe { sel.Length() } {
                     if len > 0 {
@@ -283,10 +315,23 @@ fn detect_selection(pt: windows::Win32::Foundation::POINT) -> Option<Selection> 
         };
     }
 
-    let r = range?;
+    let r = match range {
+        Some(r) => r,
+        None => {
+            // 常见跨机器失败：选中发生在远程桌面/远程控制窗口内（mstsc/向日葵/
+            // ToDesk 无 TextPattern）、或应用不暴露文本模式。日志用于取证。
+            dlog::write(&format!(
+                "[translate] no TextPattern selection; {}; visited={:?}",
+                fg_diag(),
+                found_class
+            ));
+            return None;
+        }
+    };
     let text = unsafe { r.GetText(-1) }.ok()?.to_string();
     let text = text.trim();
     if text.is_empty() {
+        dlog::write(&format!("[translate] selection text empty; {}", fg_diag()));
         return None;
     }
     let text: String = text.chars().take(MAX_TEXT).collect();
