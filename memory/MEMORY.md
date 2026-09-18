@@ -32,12 +32,25 @@
 
 ## 最近完成
 
-- 2026-09-05 发布 v1.0.2（进行中：构建→提交→推送→Release）
-  - 用户验收 UI 改版后指示「打包发布」；版本号 1.0.1 → **1.0.2** 全链路同步
-    （v1.0.1 保留为本地存档点 checkpoint-v1.0.1-2026-09-05，不发布；
-    README 更新日志把 v1.0.1 的兼容性/Markdown 并入 v1.0.2 说明）
-  - 流程：npm run release → 提交+tag v1.0.2 → push origin main + tag →
-    gh release create（GH_TOKEN 从 git credential fill 提取；正文用 --notes-file 保 UTF-8）
+- 2026-09-05 记忆目录规范化：`.workbuddy/` → `memory/`（用户要求）
+  - `desktop-tools/.workbuddy/memory.md` → `desktop-tools/memory/MEMORY.md`（git mv 保留历史）
+  - 工作区根 `.workbuddy/memory/*` → `memory/*`（MEMORY.md + 2026-08-10/11/13 日志），
+    新增 `memory/README.md` 说明目录约定
+  - 全仓引用同步：本文件「新会话快速恢复」、`CloudSatchel需求文档.md` 第 15 行
+  - 注：历史日志本就是 UTF-8（此前"GBK 乱码"是用 GBK 去解码造成的假象）；
+    用 PowerShell 读记忆文件时需显式指定 UTF-8
+
+- 2026-09-05 **v1.0.2 已发布** ✅
+  - commit `f245b4d` + tag `v1.0.2`（已推送 origin main）
+  - GitHub Release: https://github.com/LiuBe-github/CloudSatchel/releases/tag/v1.0.2
+  - 资产 `CloudSatchel_1.0.2_x64-setup.exe`（2.93MB，sha256 3855a8da…）
+  - 版本线：v1.0.1 不单独发布（保留为本地存档点），其兼容性/Markdown 变更并入
+    v1.0.2 说明；README 更新日志已含 v1.0.1/v1.0.2 两条
+  - 坑记录：CDP 截图产物（dev/_ui_shot.png）被 git add -A 误入库，用
+    `git rm --cached` + `--amend` 修正后**必须重打 tag**（旧 tag 仍指旧提交）；
+    教训：add -A 前先看 git status，发布前核对 commit 内容
+  - 发布流程再次验证可用：gh 2.97.0 + `git credential fill` 提取 token 设 GH_TOKEN
+    + `--notes-file`（UTF-8 中文正文 OK）；这次 GitHub 网络正常无需 curloptResolve
 
 - 2026-09-05 前端界面美化与动效优化（参照 Apple HIG；未提版本号，构建中）
   - 存档点：commit `561597a` + 本地 tag `checkpoint-v1.0.1-2026-09-05`（未推送）。
@@ -568,11 +581,14 @@
 ## 会话交接状态（2026-09 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新代码：v1.0.1（跨机器兼容性加固 + AI Markdown 渲染；本地测试版与安装包均已构建）
-- 已发布线：v0.7.x ~ v0.20.11 历史 + v1.0.0（commit `109304b`，tag v1.0.0）
-- 待办：**等用户明确指示再推送/打包**（2026-09-05 新约定：不打包、不推送是默认）。
-  用户坏机器取证（音频/任务栏/翻译三功能），按 hooks-debug.log 定向修复
-- git 状态：main 与远端同步至 `109304b`（v1.0.0）；v1.0.0 bugfix + v1.0.1 改动均未提交
+- 最新代码：**v1.0.2 已发布**（commit `f245b4d`，tag v1.0.2，GitHub Release 已创建；
+  本地存档点 `checkpoint-v1.0.1-2026-09-05` 保留未推送）
+- 已发布线：v0.7.x ~ v0.20.11 + v1.0.0（`109304b`）+ **v1.0.2（`f245b4d`）**；
+  v1.0.1 仅本地存档（不发布）
+- git 状态：main 与远端同步至 `f245b4d`（v1.0.2），工作区干净
+- 待办：用户坏机器取证（音频/任务栏/翻译三功能，v1.0.2 已带全链路诊断日志），
+  按 hooks-debug.log 定向修复；后续版本号从 1.0.3 起
+- 版本线：… → v1.0.0 正式版 → v1.0.1（存档点，未发布）→ **v1.0.2 界面美化+AI Markdown+兼容性加固**
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度 → v1.0.0 正式版 → v1.0.1 兼容性加固+AI Markdown
 
 **需求文档当前状态**
@@ -619,7 +635,11 @@
 - 窗口排查套路：窗口子类化（GWLP_WNDPROC 替换+转发）记录 WM_ACTIVATE/NCPAINT/NCCALCSIZE/NCHITTEST + 样式快照；激活自动截屏（BitBlt 屏幕 DC→BMP）抓 DWM 合成画面（CopyFromScreen/PrintWindow 对透明合成窗口均不可靠，程序内截屏才有效）
 
 **新会话快速恢复**
-1. 第一句：「读取记忆」（读 `.workbuddy/memory.md`）+ 读取 `CloudSatchel需求文档.md`
+1. 第一句：「读取记忆」——按顺序读：
+   - `desktop-tools/memory/MEMORY.md`（本项目记忆，最详细，即本文件）
+   - `memory/MEMORY.md`（工作区级长期记忆：工程约定 + 踩坑大全）
+   - 再读 `CloudSatchel需求文档.md`（工作区根目录）
+   （旧路径 `.workbuddy/memory.md` 已于 2026-09-05 迁移到 `memory/MEMORY.md`）
 2. 即可继续开发/修 bug；**默认动作（2026-09-05 用户约定）：改代码后只更新本地测试版**
    （`npm run tauri build -- --no-bundle`）；打包安装包 / git push / tag / Release 必须等
    用户明确指示（打包=`npm run release`；推送=commit/push/tag + gh release create，
