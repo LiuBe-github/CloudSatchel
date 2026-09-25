@@ -119,6 +119,13 @@ interface PerformancePanelProps {
   /** 采样/刷新间隔（毫秒） */
   intervalMs: number;
   onIntervalChange: (ms: number) => void;
+  /** 任务栏性能小组件（FR-03 扩展） */
+  taskbarEnabled: boolean;
+  taskbarItems: string[];
+  taskbarOffsetX: number;
+  onTaskbarEnabledChange: (enabled: boolean) => void;
+  onTaskbarItemsChange: (items: string[]) => void;
+  onTaskbarOffsetXChange: (offset: number) => void;
 }
 
 const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
@@ -127,16 +134,58 @@ const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 1000, label: "1000ms" },
 ];
 
+/** 任务栏小组件可显示的项（id 顺序即默认显示顺序） */
+const WIDGET_ITEMS: Array<{ id: string; label: string }> = [
+  { id: "cpu", label: "CPU 占用率" },
+  { id: "memory", label: "内存占用率" },
+  { id: "gpu_temp", label: "GPU 温度" },
+  { id: "net", label: "网络速率" },
+];
+
+/** 左右微调范围（逻辑像素） */
+const OFFSET_LIMIT = 150;
+
 export function PerformancePanel({
   enabled,
   busy,
   onChange,
   intervalMs,
   onIntervalChange,
+  taskbarEnabled,
+  taskbarItems,
+  taskbarOffsetX,
+  onTaskbarEnabledChange,
+  onTaskbarItemsChange,
+  onTaskbarOffsetXChange,
 }: PerformancePanelProps) {
   const [section, setSection] = useState<PerfSection>("cpu");
   const [snapshot, setSnapshot] = useState<PerfSnapshot | null>(null);
   const [history, setHistory] = useState<PerfSnapshot[]>([]);
+
+  // 任务栏小组件：已显示项排在前面（顺序即组件上的显示顺序），未显示项列在后面
+  const orderedWidgetItems = useMemo(() => {
+    const on = taskbarItems.filter((id) => WIDGET_ITEMS.some((m) => m.id === id));
+    const off = WIDGET_ITEMS.map((m) => m.id).filter((id) => !on.includes(id));
+    return [...on, ...off];
+  }, [taskbarItems]);
+
+  const toggleWidgetItem = (id: string) => {
+    if (taskbarItems.includes(id)) {
+      onTaskbarItemsChange(taskbarItems.filter((item) => item !== id));
+    } else {
+      onTaskbarItemsChange([...taskbarItems, id]);
+    }
+  };
+
+  const moveWidgetItem = (id: string, delta: number) => {
+    const index = taskbarItems.indexOf(id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= taskbarItems.length) return;
+    const next = [...taskbarItems];
+    next[index] = taskbarItems[target];
+    next[target] = id;
+    onTaskbarItemsChange(next);
+  };
 
   useEffect(() => {
     if (!enabled) {
@@ -370,6 +419,80 @@ export function PerformancePanel({
           <Switch checked={enabled} onChange={onChange} disabled={busy} />
         </div>
       </div>
+
+      <div className="detail-row perf-widget-row">
+        <div className="detail-state">
+          <div className="state-label">任务栏显示</div>
+        </div>
+        <Switch
+          checked={taskbarEnabled}
+          onChange={() => onTaskbarEnabledChange(!taskbarEnabled)}
+          disabled={!enabled || busy}
+        />
+      </div>
+
+      {taskbarEnabled && enabled && (
+        <div className="perf-widget-config">
+          {orderedWidgetItems.map((id) => {
+            const meta = WIDGET_ITEMS.find((m) => m.id === id);
+            if (!meta) return null;
+            const index = taskbarItems.indexOf(id);
+            const on = index >= 0;
+            return (
+              <div className="perf-widget-item" key={id}>
+                <span className="perf-widget-name">{meta.label}</span>
+                <div className="perf-widget-actions">
+                  <button
+                    type="button"
+                    className="seg-btn perf-widget-move"
+                    onClick={() => moveWidgetItem(id, -1)}
+                    disabled={!on || index === 0}
+                    title="上移"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="seg-btn perf-widget-move"
+                    onClick={() => moveWidgetItem(id, 1)}
+                    disabled={!on || index === taskbarItems.length - 1}
+                    title="下移"
+                  >
+                    ↓
+                  </button>
+                  <Switch checked={on} onChange={() => toggleWidgetItem(id)} />
+                </div>
+              </div>
+            );
+          })}
+          <div className="perf-widget-item">
+            <span className="perf-widget-name">左右微调</span>
+            <div className="perf-widget-actions">
+              <button
+                type="button"
+                className="seg-btn perf-widget-move"
+                onClick={() => onTaskbarOffsetXChange(Math.max(-OFFSET_LIMIT, taskbarOffsetX - 1))}
+                disabled={taskbarOffsetX <= -OFFSET_LIMIT}
+                title="左移 1px"
+              >
+                −
+              </button>
+              <span className="perf-widget-offset">
+                {taskbarOffsetX > 0 ? `+${taskbarOffsetX}` : taskbarOffsetX} px
+              </span>
+              <button
+                type="button"
+                className="seg-btn perf-widget-move"
+                onClick={() => onTaskbarOffsetXChange(Math.min(OFFSET_LIMIT, taskbarOffsetX + 1))}
+                disabled={taskbarOffsetX >= OFFSET_LIMIT}
+                title="右移 1px"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="perf-layout">
         <nav className="perf-nav">

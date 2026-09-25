@@ -19,6 +19,7 @@ mod hooks;
 mod hotkey;
 mod icons;
 mod perf;
+mod perf_widget;
 mod prefs;
 mod privacy;
 mod taskbar;
@@ -55,6 +56,9 @@ pub(crate) struct AppState {
     privacy_active: Mutex<bool>,     // 隐私操作当前是否已触发（运行时状态，不入盘）
     pub(crate) autohide_enabled: Mutex<bool>, // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
     perf_interval_ms: Mutex<u32>,    // 性能监控采样间隔（毫秒）
+    perf_taskbar_enabled: Mutex<bool>, // 任务栏性能小组件开关（FR-03 扩展，默认关）
+    perf_taskbar_items: Mutex<Vec<String>>, // 任务栏小组件显示项（顺序即显示顺序）
+    perf_taskbar_offset_x: Mutex<i32>, // 任务栏小组件左右微调（逻辑像素，-150~150）
     ai_model: Mutex<String>,         // AI 助手模型名
     ai_base_url: Mutex<String>,      // AI 助手接口地址（OpenAI 兼容，默认 OpenAI 官方）
     privacy_boss_key: Mutex<String>, // 隐私老板键（FR-13 扩展，默认 Ctrl+`）
@@ -95,6 +99,14 @@ impl Default for AppState {
             privacy_active: Mutex::new(false),
             autohide_enabled: Mutex::new(false),
             perf_interval_ms: Mutex::new(1000),
+            perf_taskbar_enabled: Mutex::new(false),
+            perf_taskbar_items: Mutex::new(vec![
+                "cpu".to_string(),
+                "memory".to_string(),
+                "gpu_temp".to_string(),
+                "net".to_string(),
+            ]),
+            perf_taskbar_offset_x: Mutex::new(0),
             ai_model: Mutex::new("gpt-4o-mini".to_string()),
             ai_base_url: Mutex::new(ai::DEFAULT_BASE_URL.to_string()),
             privacy_boss_key: Mutex::new("Ctrl+`".to_string()),
@@ -134,6 +146,9 @@ struct Snapshot {
     privacy_active: bool,
     autohide_enabled: bool,
     perf_interval_ms: u32,
+    perf_taskbar_enabled: bool,
+    perf_taskbar_items: Vec<String>,
+    perf_taskbar_offset_x: i32,
     ai_model: String,
     ai_base_url: String,
     privacy_boss_key: String,
@@ -179,6 +194,9 @@ fn snapshot(state: &AppState) -> Snapshot {
         privacy_active: *state.privacy_active.lock().unwrap(),
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
+        perf_taskbar_enabled: *state.perf_taskbar_enabled.lock().unwrap(),
+        perf_taskbar_items: state.perf_taskbar_items.lock().unwrap().clone(),
+        perf_taskbar_offset_x: *state.perf_taskbar_offset_x.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
@@ -224,6 +242,9 @@ fn persist(state: &AppState) {
         privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
+        perf_taskbar_enabled: *state.perf_taskbar_enabled.lock().unwrap(),
+        perf_taskbar_items: state.perf_taskbar_items.lock().unwrap().clone(),
+        perf_taskbar_offset_x: *state.perf_taskbar_offset_x.lock().unwrap(),
         ai_model: state.ai_model.lock().unwrap().clone(),
         ai_base_url: state.ai_base_url.lock().unwrap().clone(),
         privacy_boss_key: state.privacy_boss_key.lock().unwrap().clone(),
@@ -313,6 +334,7 @@ fn sync_taskbar(app: &AppHandle, state: &std::sync::Arc<AppState>) {
 fn cleanup_on_exit(app: &AppHandle) {
     hooks::stop();
     perf::stop();
+    perf_widget::stop();
     privacy::stop();
     audio::stop();
     translate::stop();
@@ -852,6 +874,8 @@ fn set_performance_monitor(
     } else {
         perf::stop();
     }
+    // 任务栏小组件跟随总开关：关闭时立即隐藏（没有数据源）
+    perf_widget::set_monitor_on(enabled);
     persist(&state);
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
@@ -861,6 +885,70 @@ fn set_performance_monitor(
 #[tauri::command]
 fn get_perf_snapshot() -> Option<perf::PerfSnapshot> {
     perf::latest()
+}
+
+/// 开关「任务栏显示」性能小组件（FR-03 扩展，默认关闭）
+#[tauri::command]
+fn set_perf_taskbar_enabled(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Snapshot {
+    {
+        let mut current = state.perf_taskbar_enabled.lock().unwrap();
+        if *current == enabled {
+            drop(current);
+            return snapshot(&state);
+        }
+        *current = enabled;
+    }
+    perf_widget::set_enabled(enabled);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置任务栏小组件显示项（仅允许 cpu/memory/gpu_temp/net，去重；
+/// 顺序即显示顺序；空列表 → 隐藏）
+#[tauri::command]
+fn set_perf_taskbar_items(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    items: Vec<String>,
+) -> Snapshot {
+    let mut normalized: Vec<String> = Vec::new();
+    for raw in items {
+        if matches!(
+            raw.as_str(),
+            "cpu" | "memory" | "gpu_temp" | "net"
+        ) && !normalized.contains(&raw)
+        {
+            normalized.push(raw);
+        }
+    }
+    *state.perf_taskbar_items.lock().unwrap() = normalized.clone();
+    perf_widget::set_items(normalized);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 设置任务栏小组件左右微调（逻辑像素，-150 ~ 150）
+#[tauri::command]
+fn set_perf_taskbar_offset_x(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    offset: i32,
+) -> Snapshot {
+    let offset = offset.clamp(perf_widget::OFFSET_MIN, perf_widget::OFFSET_MAX);
+    *state.perf_taskbar_offset_x.lock().unwrap() = offset;
+    perf_widget::set_offset_x(offset);
+    persist(&state);
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
 }
 
 /// 把空闲类配置同步给 privacy 模块（含开关变化时的即时动作）
@@ -1613,6 +1701,9 @@ pub fn run() {
     *state.privacy_idle_secs.lock().unwrap() = prefs.privacy_idle_secs;
     *state.autohide_enabled.lock().unwrap() = prefs.autohide_enabled;
     *state.perf_interval_ms.lock().unwrap() = prefs.perf_interval_ms;
+    *state.perf_taskbar_enabled.lock().unwrap() = prefs.perf_taskbar_enabled;
+    *state.perf_taskbar_items.lock().unwrap() = prefs.perf_taskbar_items.clone();
+    *state.perf_taskbar_offset_x.lock().unwrap() = prefs.perf_taskbar_offset_x;
     *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
     *state.ai_base_url.lock().unwrap() = prefs.ai_base_url.clone();
     *state.privacy_boss_key.lock().unwrap() = prefs.privacy_boss_key.clone();
@@ -1653,6 +1744,9 @@ pub fn run() {
             set_privacy_boss_key,
             set_autohide_enabled,
             set_perf_interval_ms,
+            set_perf_taskbar_enabled,
+            set_perf_taskbar_items,
+            set_perf_taskbar_offset_x,
             set_ai_model,
             set_ai_base_url,
             set_ai_popup_enabled,
@@ -1708,6 +1802,11 @@ pub fn run() {
             if *state.performance_monitor.lock().unwrap() {
                 perf::start();
             }
+            // 任务栏性能小组件（FR-03 扩展）：按持久化状态恢复
+            perf_widget::set_monitor_on(*state.performance_monitor.lock().unwrap());
+            perf_widget::set_items(state.perf_taskbar_items.lock().unwrap().clone());
+            perf_widget::set_offset_x(*state.perf_taskbar_offset_x.lock().unwrap());
+            perf_widget::set_enabled(*state.perf_taskbar_enabled.lock().unwrap());
             // 隐私操作 / 任务栏自动隐藏：先同步配置再启动空闲轮询
             sync_idle(&state);
             privacy::start();

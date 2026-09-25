@@ -26,6 +26,14 @@ fn default_idle_secs() -> u32 {
 fn default_perf_interval() -> u32 {
     1000
 }
+fn default_perf_taskbar_items() -> Vec<String> {
+    vec![
+        "cpu".to_string(),
+        "memory".to_string(),
+        "gpu_temp".to_string(),
+        "net".to_string(),
+    ]
+}
 fn default_ai_model() -> String {
     "gpt-4o-mini".to_string()
 }
@@ -91,6 +99,12 @@ pub struct AppPrefs {
     pub autohide_enabled: bool, // 任务栏自动隐藏（FR-02 开关二，开启即隐藏）
     #[serde(default = "default_perf_interval")]
     pub perf_interval_ms: u32, // 性能监控采样间隔（毫秒）
+    #[serde(default)]
+    pub perf_taskbar_enabled: bool, // 任务栏性能小组件（默认关闭）
+    #[serde(default = "default_perf_taskbar_items")]
+    pub perf_taskbar_items: Vec<String>, // 任务栏小组件显示项（顺序即显示顺序）
+    #[serde(default)]
+    pub perf_taskbar_offset_x: i32, // 任务栏小组件左右微调（逻辑像素，-150~150）
     #[serde(default = "default_ai_model")]
     pub ai_model: String, // AI 助手模型名（API Key 单独 DPAPI 加密存储）
     #[serde(default = "default_ai_base_url")]
@@ -151,6 +165,9 @@ impl Default for AppPrefs {
             privacy_idle_secs: default_idle_secs(),
             autohide_enabled: false,
             perf_interval_ms: default_perf_interval(),
+            perf_taskbar_enabled: false,
+            perf_taskbar_items: default_perf_taskbar_items(),
+            perf_taskbar_offset_x: 0,
             ai_model: default_ai_model(),
             ai_base_url: default_ai_base_url(),
             privacy_boss_key: default_boss_key(),

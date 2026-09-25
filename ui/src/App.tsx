@@ -22,6 +22,9 @@ import {
   saveTranslateMsKey,
   setAutohideEnabled,
   setPerfIntervalMs,
+  setPerfTaskbarEnabled,
+  setPerfTaskbarItems,
+  setPerfTaskbarOffsetX,
   setAutostart,
   setCloseToTray,
   setBackground,
@@ -150,6 +153,9 @@ function App({ initial }: AppProps) {
       fullscreenActive: false,
       autohideEnabled: false,
       perfIntervalMs: 1000,
+      perfTaskbarEnabled: false,
+      perfTaskbarItems: ["cpu", "memory", "gpu_temp", "net"],
+      perfTaskbarOffsetX: 0,
       aiModel: "gpt-4o-mini",
       aiBaseUrl: "https://api.openai.com/v1",
       theme: "system",
@@ -444,6 +450,37 @@ function App({ initial }: AppProps) {
     }
   }, []);
 
+  const handlePerfTaskbarEnabled = useCallback(async (enabled: boolean) => {
+    try {
+      const next = await setPerfTaskbarEnabled(enabled);
+      setState(next);
+      toastRef.current?.show(enabled ? "任务栏性能组件已开启" : "任务栏性能组件已关闭");
+    } catch (err) {
+      console.error("切换任务栏性能组件失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handlePerfTaskbarItems = useCallback(async (items: string[]) => {
+    try {
+      const next = await setPerfTaskbarItems(items);
+      setState(next);
+    } catch (err) {
+      console.error("更新任务栏组件显示项失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
+  const handlePerfTaskbarOffsetX = useCallback(async (offset: number) => {
+    try {
+      const next = await setPerfTaskbarOffsetX(offset);
+      setState(next);
+    } catch (err) {
+      console.error("更新任务栏组件位置失败", err);
+      toastRef.current?.show("操作失败，请稍后重试");
+    }
+  }, []);
+
   const handleAiModelChange = useCallback((model: string) => {
     setState((s) => ({ ...s, aiModel: model }));
   }, []);
@@ -603,7 +640,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v1.0.2</div>
+          <div className="sidebar-version">v1.1.0</div>
           </div>
         </aside>
 
@@ -616,6 +653,12 @@ function App({ initial }: AppProps) {
               onChange={handleToggle}
               intervalMs={state.perfIntervalMs}
               onIntervalChange={handlePerfInterval}
+              taskbarEnabled={state.perfTaskbarEnabled}
+              taskbarItems={state.perfTaskbarItems}
+              taskbarOffsetX={state.perfTaskbarOffsetX}
+              onTaskbarEnabledChange={handlePerfTaskbarEnabled}
+              onTaskbarItemsChange={handlePerfTaskbarItems}
+              onTaskbarOffsetXChange={handlePerfTaskbarOffsetX}
             />
           ) : isAi ? (
             <AiPanel

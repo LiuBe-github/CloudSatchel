@@ -24,6 +24,9 @@ export interface AppState {
   privacyActive: boolean; // 隐私操作当前是否已触发
   autohideEnabled: boolean; // 任务栏自动隐藏是否激活（开启即隐藏）
   perfIntervalMs: number; // 性能监控采样间隔（毫秒）
+  perfTaskbarEnabled: boolean; // 任务栏性能小组件是否显示（默认关闭）
+  perfTaskbarItems: string[]; // 任务栏小组件显示项（顺序即显示顺序："cpu" | "memory" | "net"）
+  perfTaskbarOffsetX: number; // 任务栏小组件左右微调（逻辑像素，-150~150）
   aiModel: string; // AI 助手模型名
   aiBaseUrl: string; // AI 助手接口地址（OpenAI 兼容）
   privacyBossKey: string; // 隐私老板键（默认 Ctrl+`）

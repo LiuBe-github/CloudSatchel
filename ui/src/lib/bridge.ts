@@ -27,6 +27,9 @@ const FALLBACK_STATE: AppState = {
   privacyActive: false,
   autohideEnabled: false,
   perfIntervalMs: 1000,
+  perfTaskbarEnabled: false,
+  perfTaskbarItems: ["cpu", "memory", "gpu_temp", "net"],
+  perfTaskbarOffsetX: 0,
   aiModel: "gpt-4o-mini",
   aiBaseUrl: "https://api.openai.com/v1",
   privacyBossKey: "Ctrl+`",
@@ -179,6 +182,24 @@ export function onAudioWave(cb: (wave: number[]) => void): () => void {
 export async function setPerfIntervalMs(ms: number): Promise<AppState> {
   if (!inTauri()) return fallback({ perfIntervalMs: ms });
   return (await invoke<AppState>("set_perf_interval_ms", { ms })) as AppState;
+}
+
+/** 开关「任务栏显示」性能小组件（FR-03 扩展） */
+export async function setPerfTaskbarEnabled(enabled: boolean): Promise<AppState> {
+  if (!inTauri()) return fallback({ perfTaskbarEnabled: enabled });
+  return (await invoke<AppState>("set_perf_taskbar_enabled", { enabled })) as AppState;
+}
+
+/** 设置任务栏小组件显示项（顺序即显示顺序；空数组 → 隐藏组件） */
+export async function setPerfTaskbarItems(items: string[]): Promise<AppState> {
+  if (!inTauri()) return fallback({ perfTaskbarItems: items });
+  return (await invoke<AppState>("set_perf_taskbar_items", { items })) as AppState;
+}
+
+/** 设置任务栏小组件左右微调（逻辑像素，-150 ~ 150） */
+export async function setPerfTaskbarOffsetX(offset: number): Promise<AppState> {
+  if (!inTauri()) return fallback({ perfTaskbarOffsetX: offset });
+  return (await invoke<AppState>("set_perf_taskbar_offset_x", { offset })) as AppState;
 }
 
 export async function getPerfSnapshot(): Promise<PerfSnapshot | null> {

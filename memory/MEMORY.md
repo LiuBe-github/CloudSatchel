@@ -4,7 +4,7 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v1.0.0
+- 当前版本：v1.1.0（本地测试版，未打包未发布；上一发布版 v1.0.2）
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
 - 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.28）
@@ -29,8 +29,67 @@
 - **音频识别（v0.15.0）：右下角媒体面板，SMTC 控制 + WASAPI 波形；v0.17.0 起为主界面功能列表项（不再在设置面板）**
 - **鼠标选取翻译（v0.20.0）：选中文字松手弹「翻译」按钮，点击出翻译弹窗（AI 助理 / 微软翻译），点击外部关闭**
 - **音频面板音量调节条（v0.20.0）：面板内系统音量滑块 + 静音开关**
+- **任务栏性能小组件（v1.1.0）：主屏任务栏托盘区（输入法/时钟）左侧的原生 Direct2D 文字组件
+  （CPU 占用率 / 内存占用率 / GPU 温度 / 网速，可配置开关与顺序、可左右微调；
+  纯展示鼠标穿透，随任务栏/全屏自动隐藏；内容过宽自动分两行）**
 
 ## 最近完成
+
+- 2026-09-22 **v1.1.0 主机性能监控 · 任务栏小组件（Direct2D 原生渲染）**（本地测试版，未发布）
+  - 需求：TrafficMonitor 式任务栏组件，贴在系统托盘区（输入法/时钟）左侧；经 12 轮问答锁定：
+    文字数值（带标签 CPU 12% · 内存 45% · ↑1.2M ↓8.4M）、纯展示鼠标穿透、托盘左侧固定+可微调、
+    仅主屏、跟随任务栏显隐、Direct2D 渲染、每项可开关+排序、详情页子开关（默认关）、
+    刷新跟随采样间隔（下限 500ms）、仅支持屏幕底部任务栏
+  - 新增 `src-tauri/src/perf_widget.rs`（约 800 行）：独立线程 + 消息循环；窗口
+    WS_POPUP + WS_EX_TOOLWINDOW|NOACTIVATE|LAYERED|TRANSPARENT（不进 Alt+Tab、不抢焦点、
+    点击穿透）；Direct2D `ID2D1DCRenderTarget`（预乘 alpha）绑定 32bpp 顶向下 DIB +
+    DirectWrite `DrawText`（灰度抗锯齿）+ `UpdateLayeredWindow` 提交 → 背景全透明只有文字；
+    数值加重影描边（反相 1px 四向偏移）保证透明任务栏压在壁纸上也可读
+  - 排版：项顺序 = 配置顺序，项间 `·` 分隔；值列按参考串（`100%` / `999.9M`）预留宽度并右对齐
+    → 数字变化整行不抖；右边缘贴 TrayNotifyWnd.left − 6px(缩放) + 微调，向左扩展；
+    字号 = clamp(round(任务栏高×0.28), 11×scale, 16×scale)；颜色读 SystemUsesLightTheme（只读注册表）
+  - 显隐：任务栏不可见 / 自动隐藏动画中 / 系统自动隐藏滑出中 / 存在全屏窗口 / 隐私触发 /
+    总开关或子开关关闭 → 隐藏；每 250ms 复核几何与可见性，60ms 帧循环，仅在文本或配色变化时重绘
+  - 接线：AppState + prefs 新增 perf_taskbar_enabled（默认 false）/ perf_taskbar_items（默认
+    ["cpu","memory","net"]）/ perf_taskbar_offset_x（±150）；新命令 set_perf_taskbar_enabled /
+    _items（白名单去重）/ _offset_x（clamp）；性能详情页新增「任务栏显示」开关 + 显示项开关与
+    上/下移 + 左右微调步进（沿用「只有大标题与控件」风格，无灰色小字）
+  - 依赖：`windows` crate 新增 Win32_Graphics_Direct2D(_Common) / DirectWrite / Dxgi_Common /
+    Gdi / WindowsAndMessaging / UI_HiDpi / System_LibraryLoader 特性
+  - 验证：cargo test 13 项全过（新增 6 项：速率进位、项顺序与白名单、片段与分隔符、阈值配色、
+    几何锚定与缩放、非底部/竖向任务栏与滑出判定）；实机验证：组件出现在托盘左侧
+    （400×60 @2560×1440 125% 缩放）、微调 −60 → 左移 75px、仅网络项宽度 183、全屏时隐藏
+    退出恢复、自动隐藏任务栏时隐藏、子开关关闭即消失、退出应用无残留窗口
+  - 坑：本机 PowerShell 探针默认 DPI 不感知，会把 2560×1440 报成 2048×1152（截图/坐标全部错位），
+    排查窗口位置与截图必须先 SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)
+  - 迭代（同日追加）：用户要求再加 **CPU 温度 / GPU 温度**，并且「一行放不下就分上下两行」
+    - 显示项先扩展到 5 个（含 cpu_temp），后按用户决定**移除 CPU 温度**，最终 4 个：
+      cpu / memory / gpu_temp / net；温度值格式 `55°C`，读不到时显示 `--`；
+      温度阈值 >85°C 红、>75°C 橙
+    - **CPU 温度为什么读不到（2026-09-22 实测结论，勿重复踩坑）**：
+      ① Windows 没有给桌面应用提供读 CPU 温度的公开接口，唯一"系统自带"通道是 ACPI 热区
+        `root\wmi:MSAcpi_ThermalZoneTemperature`（sysinfo 在 Windows 上就是走它）——
+        本机（联想 Legion / AMD Ryzen 7 5800H）**即使提权也返回"不支持"**，且
+        `\Thermal Zone Information(*)\Temperature` 性能计数器对象不存在 → 固件没暴露热区；
+      ② 联想厂商通道确实存在：`root\wmi:LENOVO_GAMEZONE_DATA` / `LENOVO_FAN_METHOD`，
+        **普通权限查实例直接"拒绝访问"（必须管理员）**，且**必须在实例上调用方法**
+        （在类上调用报"无效的方法参数"）；提权后 `Fan_GetCurrentSensorTemperature(SensorID=3)`
+        返回真实温度（实测 75°C），`GetCPUTemp` 返回 0（该机型未实现）；
+      ③ GPU 温度能读是因为 NVIDIA 有用户态 NVML（`nvidia.dll`），无需管理员/驱动；
+         HWiNFO/鲁大师这类能读 CPU 温度是因为装了内核驱动去读 CPU MSR；
+      ④ 决策：不引入提权助手、不引第三方驱动（会破坏"不提权/不装驱动"约定，
+        且提权会让全局鼠标钩子的选区翻译失效）→ **CPU 温度从任务栏组件移除**，
+        GPU 温度保留；主界面性能面板仍保留"CPU 温度：不可用"的信息展示
+    - 布局改为**最多两行自动换行**：单行内容上限 MAX_ROW_LOGICAL=480 逻辑像素（且不超过屏宽 45%），
+      超出则按「项」贪心换行（整项挪到第二行，不会拆散一项）；行高 = 任务栏高/2，
+      两行左对齐同一左边界，字号不变；纯逻辑函数 `plan_rows()` 便于单测
+    - 实机效果：5 项时自动分两行（442×60）；移除 CPU 温度后 4 项回到单行
+      （513×60，文本日志实测 `CPU 21% · 内存 69% · GPU 80°C · ↑ 7.4K ↓ 1.1K`）
+    - 微调：用户实测后要求「标签与数值之间的间隔缩 35%」→ `LABEL_VALUE_GAP_LOGICAL`
+      4.0 → 2.6，宽度 513 → 504；再收紧为 1.6/5.0 → 475；再收紧为 **1.0/3.5 → 460**（最终值，用户确认前最后一档）
+    - 新增调试便利：首帧渲染日志 + 「文本」日志（[perf-widget] 文本: ...），远程排查一眼可见
+  - 状态：按用户约定「默认只更新本地测试版」，已构建 `src-tauri/target/release/CloudSatchel.exe`
+    （npm run tauri build -- --no-bundle），未打包安装包、未推送
 
 - 2026-09-05 记忆目录规范化：`.workbuddy/` → `memory/`（用户要求）
   - `desktop-tools/.workbuddy/memory.md` → `desktop-tools/memory/MEMORY.md`（git mv 保留历史）
@@ -581,14 +640,14 @@
 ## 会话交接状态（2026-09 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新代码：**v1.0.2 已发布**（commit `f245b4d`，tag v1.0.2，GitHub Release 已创建；
-  本地存档点 `checkpoint-v1.0.1-2026-09-05` 保留未推送）
+- 最新代码：**v1.1.0 任务栏性能小组件（本地测试版，未提交/未打包）**；上一发布版
+  **v1.0.2**（commit `f245b4d`，tag v1.0.2，GitHub Release 已创建）
 - 已发布线：v0.7.x ~ v0.20.11 + v1.0.0（`109304b`）+ **v1.0.2（`f245b4d`）**；
   v1.0.1 仅本地存档（不发布）
-- git 状态：main 与远端同步至 `f245b4d`（v1.0.2），工作区干净
+- git 状态：main 领先 origin 1 个提交（`41f79c9` 记忆目录规范化）；本轮 v1.1.0 改动未提交
 - 待办：用户坏机器取证（音频/任务栏/翻译三功能，v1.0.2 已带全链路诊断日志），
   按 hooks-debug.log 定向修复；后续版本号从 1.0.3 起
-- 版本线：… → v1.0.0 正式版 → v1.0.1（存档点，未发布）→ **v1.0.2 界面美化+AI Markdown+兼容性加固**
+- 版本线：… → v1.0.0 正式版 → v1.0.1（存档点，未发布）→ v1.0.2 界面美化+AI Markdown+兼容性加固 → **v1.1.0 任务栏性能小组件**
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度 → v1.0.0 正式版 → v1.0.1 兼容性加固+AI Markdown
 
 **需求文档当前状态**

@@ -99,6 +99,11 @@ pub fn set_interval_ms(ms: u64) {
     PERF_INTERVAL_MS.store(ms.clamp(200, 1000), Ordering::SeqCst);
 }
 
+/// 当前采样间隔（毫秒）：任务栏小组件按它节流重绘
+pub fn interval_ms() -> u64 {
+    PERF_INTERVAL_MS.load(Ordering::SeqCst)
+}
+
 pub fn start() {
     ensure_running();
     PERF_ENABLED.store(true, Ordering::SeqCst);
