@@ -1,33 +1,33 @@
 import { useEffect } from "react";
 import appIcon from "../assets/app-icon.png";
+import { Icon } from "./Icon";
 
 interface AboutPanelProps {
   open: boolean;
   onClose: () => void;
 }
 
-const APP_VERSION = "v1.1.0";
+const APP_VERSION = "v1.4.0";
 
 /** 关于面板：显示软件基本信息（花笺 Floral 式侧边面板） */
 export function AboutPanel({ open, onClose }: AboutPanelProps) {
   // Esc 关闭关于面板
   useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [open, onClose]);
 
   return (
-    <div className={`side-panel${open ? " open" : ""}`}>
+    <div id="about-panel" className={`side-panel${open ? " open" : ""}`} role="region" aria-labelledby="about-panel-title">
       <div className={`side-panel-inner${open ? " visible" : ""}`}>
         <div className="settings-header">
-          <h2 className="settings-title">关于</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="关闭关于">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
+          <h2 id="about-panel-title" data-panel-heading="about" className="settings-title" tabIndex={-1}>关于</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="关闭关于" title="关闭关于（Esc）">
+            <Icon name="close" size={16} />
           </button>
         </div>
 
@@ -50,9 +50,9 @@ export function AboutPanel({ open, onClose }: AboutPanelProps) {
         <div className="settings-section">
           <div className="settings-label">技术栈</div>
           <ul className="purity-list">
-            <li><span className="purity-check">✓</span>React 19 + TypeScript + Vite（界面）</li>
-            <li><span className="purity-check">✓</span>Tauri 2（Rust）+ Win32 API（桌面壳）</li>
-            <li><span className="purity-check">✓</span>界面设计参照「花笺 Floral Notepaper」</li>
+            <li><span className="purity-check"><Icon name="check" size={14} /></span>React 19 + TypeScript + Vite（界面）</li>
+            <li><span className="purity-check"><Icon name="check" size={14} /></span>Tauri 2（Rust）+ Win32 API（桌面壳）</li>
+            <li><span className="purity-check"><Icon name="check" size={14} /></span>界面设计参照「花笺 Floral Notepaper」</li>
           </ul>
         </div>
 

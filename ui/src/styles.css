@@ -255,8 +255,8 @@ select:focus-visible {
 }
 
 .icon-btn {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -393,9 +393,12 @@ select:focus-visible {
 }
 
 .feature-icon {
-  font-size: 15px;
   line-height: 1;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: color-mix(in srgb, currentColor 88%, var(--color-bamboo-light));
 }
 
 .feature-name {
@@ -592,6 +595,39 @@ select:focus-visible {
 }
 
 /* ---------- 主机性能监控 ---------- */
+.performance-card {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-faint) transparent;
+}
+.performance-card::-webkit-scrollbar {
+  width: 7px;
+}
+.performance-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+.performance-card::-webkit-scrollbar-thumb {
+  background: var(--color-ink-faint);
+  border-radius: 999px;
+}
+.performance-card::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-ghost);
+}
+/* 性能组件配置展开时可能超过默认窗口高度：由整张卡片统一滚动，
+   避免“配置区固定 + 明细区二次滚动”造成可操作项被挤出。 */
+.performance-card .perf-layout {
+  flex: 0 0 auto;
+  min-height: 430px;
+}
+.performance-card .perf-detail-list {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+  padding-right: 0;
+}
+
 .perf-switch-row {
   align-items: center;
 }
@@ -647,10 +683,12 @@ select:focus-visible {
 }
 
 .perf-nav-icon {
-  width: 16px;
+  width: 18px;
   text-align: center;
-  font-size: 13px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .perf-main {
@@ -870,6 +908,20 @@ select:focus-visible {
   transform: translateX(var(--thumb-x, 0px));
   transition: transform 0.25s var(--ease-spring);
 }
+.switch-spinner {
+  position: absolute;
+  inset: 8px;
+  border: 1.5px solid color-mix(in srgb, var(--color-bamboo) 35%, transparent);
+  border-top-color: var(--color-bamboo);
+  border-radius: 50%;
+  animation: switch-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+.switch.on .switch-spinner {
+  border-color: color-mix(in srgb, var(--color-paper) 38%, transparent);
+  border-top-color: var(--color-paper);
+}
+@keyframes switch-spin { to { transform: rotate(360deg); } }
 /* 按压时滑块拉长（拟物弹簧手感） */
 .switch:active:not(:disabled) .switch-thumb {
   transform: translateX(var(--thumb-x, 0px)) scaleX(1.18);
@@ -1036,7 +1088,9 @@ select:focus-visible {
     inset 0 1px 0 color-mix(in srgb, var(--color-cloud) 24%, transparent);
 }
 .theme-option-icon {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .setting-row {
@@ -1044,6 +1098,21 @@ select:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+/* 堆叠变体（v1.4.0）：标题一行、控件独占一行——320px 侧栏内容仅 280px，
+   行内排不下「长标题 + 输入框 + 多按钮」，会把标题压成竖排单字 */
+.setting-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.setting-row--stack .hotkey-editor {
+  flex-shrink: 1;
+}
+.setting-row--stack .hotkey-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
 }
 /* 设置项之间留足间距，避免删掉说明后行与行重叠/拥挤 */
 .setting-row + .setting-row {
@@ -1244,7 +1313,7 @@ select:focus-visible {
   animation: toast-out 0.24s var(--ease-out) forwards;
 }
 
-.toast-check {
+.toast-icon {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
@@ -1257,6 +1326,13 @@ select:focus-visible {
   font-size: 11px;
   font-weight: 700;
   box-shadow: 0 2px 6px var(--color-shadow);
+}
+.toast[data-tone="warning"] .toast-icon {
+  color: #4e3710;
+  background: #e0aa48;
+}
+.toast[data-tone="error"] .toast-icon {
+  background: var(--color-danger);
 }
 
 /* ---------- 动画 ---------- */
@@ -1586,6 +1662,9 @@ select:focus-visible {
   user-select: none;
 }
 .ai-popup-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-bamboo);
@@ -2264,6 +2343,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -2429,4 +2509,103 @@ select:focus-visible {
   font-size: 12px;
   color: var(--color-ink-soft);
   font-variant-numeric: tabular-nums;
+}
+/* ---------------------------------------------------------------------------
+ * 隐私解锁卡片（privacy-unlock 窗口，v1.3.0）
+ * 与翻译弹窗同款纸感卡片：无外阴影（透明窗口外阴影会裁出虚框），仅 inset 高光
+ * ------------------------------------------------------------------------- */
+.privacy-unlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  padding: 24px 32px;
+  background: var(--color-paper);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-paper-deep) 65%, transparent);
+  overflow: hidden;
+  animation: popup-in 0.3s var(--ease-spring) both;
+}
+
+.privacy-unlock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-bamboo);
+  line-height: 1;
+}
+
+.privacy-unlock-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.privacy-unlock-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  text-align: center;
+  color: var(--color-ink);
+  background: var(--color-paper-warm);
+  border: 1px solid var(--color-paper-deep);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.privacy-unlock-input:focus {
+  border-color: var(--color-bamboo);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-bamboo) 18%, transparent);
+}
+
+.privacy-unlock-error {
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.privacy-unlock-btn {
+  width: 100%;
+}
+
+/* 忘记密码入口（v1.4.0）：文本按钮，走 Windows Hello 系统验证 */
+.privacy-unlock-forgot {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-bamboo);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.privacy-unlock-forgot:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.privacy-unlock-forgot:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 输错密码时抖动反馈（跟随全局减弱动态效果设置） */
+.privacy-unlock.shake {
+  animation: unlock-shake 0.4s var(--ease-out);
+}
+@keyframes unlock-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .privacy-unlock.shake {
+    animation: none;
+  }
 }

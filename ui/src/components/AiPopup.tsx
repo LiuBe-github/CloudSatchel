@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Icon } from "./Icon";
 import type { AiMessage } from "../vite-env";
 import {
   aiSend,
@@ -157,12 +158,10 @@ export default function AiPopup() {
       {/* 小窗标题栏（可拖拽） */}
       <header className="ai-popup-titlebar" data-tauri-drag-region>
         <span className="ai-popup-title" data-tauri-drag-region>
-          ✳ AI 小窗
+          <Icon name="sparkles" size={16} /> AI 小窗
         </span>
         <button className="icon-btn" onClick={hide} aria-label="隐藏小窗" title="隐藏（Esc）">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
+          <Icon name="close" size={14} />
         </button>
       </header>
 

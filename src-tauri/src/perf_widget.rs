@@ -69,7 +69,9 @@ use crate::{dlog, fullscreen, perf, privacy};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ItemKind {
     Cpu,
+    CpuTemp,
     Memory,
+    Gpu,
     GpuTemp,
     Net,
 }
@@ -80,7 +82,9 @@ pub(crate) fn items_from_strings(items: &[String]) -> Vec<ItemKind> {
     for raw in items {
         let kind = match raw.as_str() {
             "cpu" => ItemKind::Cpu,
+            "cpu_temp" => ItemKind::CpuTemp,
             "memory" => ItemKind::Memory,
+            "gpu" => ItemKind::Gpu,
             "gpu_temp" => ItemKind::GpuTemp,
             "net" => ItemKind::Net,
             _ => continue,
@@ -362,10 +366,36 @@ pub(crate) fn build_segments(
                     color: load_color(usage, theme),
                 });
             }
+            ItemKind::CpuTemp => {
+                let temp = snap.and_then(|s| s.cpu.temperature);
+                out.push(Segment {
+                    text: "CPU".to_string(),
+                    kind: SegKind::Label,
+                    color: label_color(theme),
+                });
+                out.push(Segment {
+                    text: format_temp(temp),
+                    kind: SegKind::Value(ColKind::Temp),
+                    color: temp_color(temp, theme),
+                });
+            }
             ItemKind::Memory => {
                 let usage = snap.map(|s| s.memory.usage).unwrap_or(0.0);
                 out.push(Segment {
                     text: "内存".to_string(),
+                    kind: SegKind::Label,
+                    color: label_color(theme),
+                });
+                out.push(Segment {
+                    text: format_percent(usage),
+                    kind: SegKind::Value(ColKind::Percent),
+                    color: load_color(usage, theme),
+                });
+            }
+            ItemKind::Gpu => {
+                let usage = snap.and_then(|s| s.gpu.utilization).unwrap_or(0.0);
+                out.push(Segment {
+                    text: "GPU".to_string(),
                     kind: SegKind::Label,
                     color: label_color(theme),
                 });
@@ -1326,13 +1356,18 @@ mod tests {
         let parsed = items_from_strings(&[
             "memory".into(),
             "bogus".into(),
+            "cpu_temp".into(),
             "cpu".into(),
             "memory".into(),
+            "gpu".into(),
             "net".into(),
         ]);
-        assert_eq!(parsed, vec![ItemKind::Memory, ItemKind::Cpu, ItemKind::Net]);
+        assert_eq!(
+            parsed,
+            vec![ItemKind::Memory, ItemKind::CpuTemp, ItemKind::Cpu, ItemKind::Gpu, ItemKind::Net]
+        );
         assert!(items_from_strings(&[]).is_empty());
-        assert!(items_from_strings(&["gpu".into()]).is_empty());
+        assert!(items_from_strings(&["bogus".into()]).is_empty());
     }
 
     #[test]
@@ -1366,6 +1401,17 @@ mod tests {
     }
 
     #[test]
+    fn gpu_utilization_formats_and_colors_like_other_load_items() {
+        let mut snap = snapshot(10.0, 40.0, 0.0, 0.0);
+        snap.gpu.utilization = Some(91.0);
+        let segs = build_segments(&[ItemKind::Gpu], Some(&snap), Theme::Dark);
+        assert_eq!(segs[0].text, "GPU");
+        assert_eq!(segs[1].text, "91%");
+        assert_eq!(segs[1].kind, SegKind::Value(ColKind::Percent));
+        assert_eq!(segs[1].color, [1.0, 0.35, 0.33, 0.98]);
+    }
+
+    #[test]
     fn temp_items_format_and_threshold_colors() {
         let mut snap = snapshot(10.0, 40.0, 0.0, 0.0);
         snap.gpu.temperature = Some(88.0);
@@ -1384,6 +1430,16 @@ mod tests {
         assert_eq!(segs[1].color, label_color(Theme::Dark));
         assert_eq!(format_temp(None), "--");
         assert_eq!(format_temp(Some(55.6)), "56°C");
+
+        // CPU 温度项：数据源链（PDH/HWiNFO/sysinfo）取到值时正常显示与阈值配色
+        let mut snap = snapshot(10.0, 40.0, 0.0, 0.0);
+        snap.cpu.temperature = Some(76.0);
+        let segs = build_segments(&[ItemKind::CpuTemp], Some(&snap), Theme::Dark);
+        let texts: Vec<&str> = segs.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, vec!["CPU", "76°C"]);
+        assert_eq!(segs[1].color, [1.0, 0.69, 0.13, 0.98]); // >75°C 橙
+        let segs = build_segments(&[ItemKind::CpuTemp], Some(&empty), Theme::Dark);
+        assert_eq!(segs[1].text, "--");
     }
 
     #[test]

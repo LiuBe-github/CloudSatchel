@@ -7,6 +7,7 @@ import {
   translateHide,
 } from "../lib/bridge";
 import { useThemeInit } from "../lib/theme";
+import { Icon } from "./Icon";
 
 interface PopupState {
   source: string;
@@ -106,17 +107,7 @@ export default function TranslatePopup() {
           onClick={() => translateHide()}
           aria-label="关闭翻译"
         >
-          <svg
-            viewBox="0 0 24 24"
-            width="14"
-            height="14"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
+          <Icon name="close" size={14} />
         </button>
       </div>
       {data.source && (

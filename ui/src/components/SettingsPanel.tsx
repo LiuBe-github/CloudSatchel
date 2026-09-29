@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { BackgroundFit, BackgroundSettings, ThemeMode } from "../vite-env";
 import { RangeRow } from "./RangeRow";
 import { Switch } from "./Switch";
+import { Icon, type IconName } from "./Icon";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -13,6 +14,9 @@ interface SettingsPanelProps {
   onCloseToTrayChange: (enabled: boolean) => void;
   privacyIdleSecs: number;
   onPrivacyIdleChange: (secs: number) => void;
+  privacyHasPassword: boolean;
+  onPrivacyPasswordSave: (password: string) => Promise<void>;
+  onPrivacyPasswordClear: () => Promise<void>;
   privacyBossKey: string;
   bossKeyRegistered: boolean;
   onBossKeyChange: (key: string) => Promise<void>;
@@ -34,10 +38,10 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
-  { value: "light", label: "浅色", icon: "☀" },
-  { value: "system", label: "跟随系统", icon: "◐" },
-  { value: "dark", label: "深色", icon: "☾" },
+const THEME_OPTIONS: { value: ThemeMode; label: string; icon: IconName }[] = [
+  { value: "light", label: "浅色", icon: "sun" },
+  { value: "system", label: "跟随系统", icon: "monitor" },
+  { value: "dark", label: "深色", icon: "moon" },
 ];
 
 const FIT_OPTIONS: { value: BackgroundFit; label: string }[] = [
@@ -67,6 +71,9 @@ export function SettingsPanel({
   onCloseToTrayChange,
   privacyIdleSecs,
   onPrivacyIdleChange,
+  privacyHasPassword,
+  onPrivacyPasswordSave,
+  onPrivacyPasswordClear,
   privacyBossKey,
   bossKeyRegistered,
   onBossKeyChange,
@@ -89,12 +96,13 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   // Esc 关闭设置面板
   useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [open, onClose]);
 
   // 老板键输入框：跟随持久化值；保存失败时回退显示当前生效值
   const [bossKeyInput, setBossKeyInput] = useState(privacyBossKey);
@@ -146,15 +154,43 @@ export function SettingsPanel({
     }
   };
 
+  // 隐私解锁密码输入框（v1.3.0）：未设置时隐私操作不可开启
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  const savePassword = async () => {
+    const pw = passwordInput.trim();
+    if (!pw || passwordSaving) return;
+    setPasswordSaving(true);
+    setPasswordError("");
+    try {
+      await onPrivacyPasswordSave(pw);
+      setPasswordInput("");
+    } catch (err) {
+      setPasswordError(String(err));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const clearPassword = async () => {
+    setPasswordError("");
+    try {
+      await onPrivacyPasswordClear();
+      setPasswordInput("");
+    } catch (err) {
+      setPasswordError(String(err));
+    }
+  };
+
   return (
-    <div className={`side-panel${open ? " open" : ""}`}>
+    <div id="settings-panel" className={`side-panel${open ? " open" : ""}`} role="region" aria-labelledby="settings-panel-title">
       <div className={`side-panel-inner${open ? " visible" : ""}`}>
         <div className="settings-header">
-          <h2 className="settings-title">应用设置</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="关闭设置">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
+          <h2 id="settings-panel-title" data-panel-heading="settings" className="settings-title" tabIndex={-1}>应用设置</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="关闭设置" title="关闭设置（Esc）">
+            <Icon name="close" size={16} />
           </button>
         </div>
 
@@ -169,7 +205,7 @@ export function SettingsPanel({
                 className={`theme-option ${theme === opt.value ? "selected" : ""}`}
                 onClick={() => onThemeChange(opt.value)}
               >
-                <span className="theme-option-icon">{opt.icon}</span>
+                <span className="theme-option-icon"><Icon name={opt.icon} size={18} /></span>
                 {opt.label}
               </button>
             ))}
@@ -254,7 +290,53 @@ export function SettingsPanel({
 
         <div className="settings-section">
           <div className="settings-label">隐私操作</div>
-          <div className="setting-row">
+          <div className="setting-row setting-row--stack">
+            <div className="setting-row-text">
+              <div className="setting-row-title">
+                解锁密码（{privacyHasPassword ? "已设置" : "未设置"}）
+              </div>
+
+            </div>
+            <div className="hotkey-editor">
+              <input
+                className="hotkey-input"
+                type="password"
+                value={passwordInput}
+                onChange={(e) => {
+                  setPasswordInput(e.target.value);
+                  setPasswordError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void savePassword();
+                  }
+                }}
+                placeholder={privacyHasPassword ? "输入新密码以修改" : "设置解锁密码"}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                className="seg-btn primary"
+                onClick={() => void savePassword()}
+                disabled={passwordSaving || !passwordInput.trim()}
+              >
+                {passwordSaving ? "保存中…" : privacyHasPassword ? "修改" : "设置"}
+              </button>
+              {privacyHasPassword && (
+                <button
+                  type="button"
+                  className="seg-btn danger"
+                  onClick={() => void clearPassword()}
+                >
+                  清除
+                </button>
+              )}
+            </div>
+          </div>
+          {passwordError && <div className="setting-row-desc error-text">{passwordError}</div>}
+          <div className="setting-row setting-row--stack">
             <div className="setting-row-text">
               <div className="setting-row-title">触发空闲时间</div>
 
@@ -271,7 +353,7 @@ export function SettingsPanel({
               ))}
             </select>
           </div>
-          <div className="setting-row">
+          <div className="setting-row setting-row--stack">
             <div className="setting-row-text">
               <div className="setting-row-title">隐私老板键</div>
 
@@ -322,6 +404,7 @@ export function SettingsPanel({
             <Switch
               checked={aiPopupEnabled}
               onChange={() => void onAiPopupEnabledChange(!aiPopupEnabled)}
+              label="启用 AI 小窗"
             />
           </div>
           <div className="setting-row">
@@ -382,7 +465,7 @@ export function SettingsPanel({
               <div className="setting-row-title">鼠标穿透</div>
 
             </div>
-            <Switch checked={audioPanelClickThrough} onChange={() => onAudioClickThroughChange(!audioPanelClickThrough)} />
+            <Switch checked={audioPanelClickThrough} onChange={() => onAudioClickThroughChange(!audioPanelClickThrough)} label="音频面板鼠标穿透" />
           </div>
         </div>
 
@@ -393,19 +476,19 @@ export function SettingsPanel({
               <div className="setting-row-title">开机自启动</div>
 
             </div>
-            <Switch checked={autostart} onChange={() => onAutostartChange(!autostart)} />
+            <Switch checked={autostart} onChange={() => onAutostartChange(!autostart)} label="开机自启动" />
           </div>
           <div className="setting-row">
             <div className="setting-row-text">
               <div className="setting-row-title">关闭到托盘</div>
 
             </div>
-            <Switch checked={closeToTray} onChange={() => onCloseToTrayChange(!closeToTray)} />
+            <Switch checked={closeToTray} onChange={() => onCloseToTrayChange(!closeToTray)} label="关闭到托盘" />
           </div>
         </div>
 
         <div className="settings-footer">
-          <span className="settings-version">云笈 · v1.1.0</span>
+          <span className="settings-version">云笈 · v1.4.0</span>
         </div>
       </div>
     </div>

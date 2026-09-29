@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AiMessage } from "../vite-env";
+import { Icon } from "./Icon";
 import {
   aiSend,
   aiStop,
@@ -198,7 +199,7 @@ export function AiPanel({ model, baseUrl, onModelChange, onBaseUrlChange }: AiPa
         <div className="ai-error-bar">
           <span>{error}</span>
           <button className="ai-error-close" onClick={() => setError("")} aria-label="关闭">
-            ×
+            <Icon name="close" size={15} />
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { inTauri, translateOpen } from "../lib/bridge";
 import { useThemeInit } from "../lib/theme";
+import { Icon } from "./Icon";
 
 /**
  * 翻译小按钮（translate-button 窗口）：选中文字松手后出现在选区下方，
@@ -15,7 +16,8 @@ export default function TranslateButton() {
       onClick={() => translateOpen()}
       title="翻译选中文本"
     >
-      翻译
+      <Icon name="translate" size={14} />
+      <span>翻译</span>
     </button>
   );
 }

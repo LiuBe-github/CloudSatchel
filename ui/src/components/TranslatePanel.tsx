@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Switch } from "./Switch";
+import { Icon } from "./Icon";
 
 interface TranslatePanelProps {
   enabled: boolean;
@@ -84,7 +85,7 @@ export function TranslatePanel({
   return (
     <div className="detail-card noise-bg">
       <div className="detail-hero">
-        <div className="detail-icon">译</div>
+        <div className="detail-icon"><Icon name="translate" size={28} /></div>
         <div className="detail-titles">
           <h1 className="detail-title">鼠标选取翻译</h1>
           <p className="detail-subtitle">选中文字松手即弹「翻译」按钮，点击出译文</p>
@@ -98,7 +99,7 @@ export function TranslatePanel({
             任意应用选中文字后松手，文字下方出现「翻译」按钮；点击弹出翻译，点击其他位置或 Esc 关闭
           </div>
         </div>
-        <Switch checked={enabled} onChange={() => void onEnabledChange(!enabled)} />
+        <Switch checked={enabled} onChange={() => void onEnabledChange(!enabled)} label="启用鼠标选取翻译" />
       </div>
       <div className="setting-row">
         <div className="setting-row-text">

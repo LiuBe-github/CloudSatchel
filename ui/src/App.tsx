@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   inTauri,
@@ -9,6 +9,10 @@ import {
   setPrivacyEnabled,
   setPrivacyIdleSecs,
   setPrivacyBossKey,
+  setPrivacyPassword,
+  clearPrivacyPassword,
+  onPrivacyPasswordRequired,
+  onPrivacyPasswordReset,
   setAiPopupEnabled,
   setAiPopupHotkey,
   setAudioPanelEnabled,
@@ -46,19 +50,28 @@ import { PerformancePanel } from "./components/PerformancePanel";
 import { AiPanel } from "./components/AiPanel";
 import { TranslatePanel } from "./components/TranslatePanel";
 import { Toast, type ToastHandle } from "./components/Toast";
+import { Icon, type IconName } from "./components/Icon";
 import appIcon from "./assets/app-icon.png";
 
-const FEATURES = [
+interface Feature {
+  id: string;
+  icon: IconName;
+  title: string;
+  subtitle: string;
+  detail: string;
+}
+
+const FEATURES: Feature[] = [
   {
     id: "hide-icons",
-    icon: "◵",
+    icon: "desktop",
     title: "双击隐藏桌面图标",
     subtitle: "在桌面空白处双击，可快速隐藏 / 显示桌面图标",
     detail: "开启后，双击桌面空白区域即可隐藏所有桌面图标；再次双击恢复显示。双击图标本身仍会正常打开应用，不会误触发。",
   },
   {
     id: "taskbar",
-    icon: "▭",
+    icon: "taskbar",
     title: "任务栏",
     subtitle: "透明任务栏与自动隐藏，让任务栏更沉浸",
     detail:
@@ -66,7 +79,7 @@ const FEATURES = [
   },
   {
     id: "performance-monitor",
-    icon: "▥",
+    icon: "performance",
     title: "主机性能监控",
     subtitle: "实时查看 CPU、GPU、内存与网络状态",
     detail:
@@ -74,15 +87,15 @@ const FEATURES = [
   },
   {
     id: "privacy",
-    icon: "◉",
+    icon: "shield",
     title: "隐私操作",
     subtitle: "空闲时自动保护屏幕，防止窥屏",
     detail:
-      "开启后，电脑空闲超过设定时间（默认 1 分钟），自动最小化所有窗口、隐藏桌面图标与任务栏并静音；您一操作鼠标或键盘，立即全部还原。",
+      "开启后，电脑空闲超过设定时间（默认 1 分钟），自动最小化所有窗口、隐藏桌面图标与任务栏并静音；恢复时需输入解锁密码（可在设置中设置），老板键可一键直接恢复。",
   },
   {
     id: "ai",
-    icon: "✳",
+    icon: "sparkles",
     title: "AI 助手",
     subtitle: "接入你自己的 OpenAI API Key 进行对话",
     detail:
@@ -90,7 +103,7 @@ const FEATURES = [
   },
   {
     id: "audio",
-    icon: "♪",
+    icon: "audio",
     title: "音频识别",
     subtitle: "桌面右下角媒体面板：音源、进度与波形",
     detail:
@@ -98,7 +111,7 @@ const FEATURES = [
   },
   {
     id: "translate",
-    icon: "译",
+    icon: "translate",
     title: "鼠标选取翻译",
     subtitle: "选中文字松手即弹「翻译」按钮，点击出译文",
     detail:
@@ -133,6 +146,7 @@ function App({ initial }: AppProps) {
       privacyEnabled: false,
       privacyIdleSecs: 60,
       privacyActive: false,
+      privacyHasPassword: false,
       privacyBossKey: "Ctrl+`",
       bossKeyRegistered: false,
       aiPopupEnabled: true,
@@ -154,7 +168,7 @@ function App({ initial }: AppProps) {
       autohideEnabled: false,
       perfIntervalMs: 1000,
       perfTaskbarEnabled: false,
-      perfTaskbarItems: ["cpu", "memory", "gpu_temp", "net"],
+      perfTaskbarItems: ["cpu", "memory", "gpu", "gpu_temp", "net"],
       perfTaskbarOffsetX: 0,
       aiModel: "gpt-4o-mini",
       aiBaseUrl: "https://api.openai.com/v1",
@@ -179,6 +193,10 @@ function App({ initial }: AppProps) {
     () => localStorage.getItem("backgroundImageName") ?? "",
   );
   const toastRef = useRef<ToastHandle>(null);
+  const featureRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const aboutTriggerRef = useRef<HTMLButtonElement>(null);
+  const lastSidePanelTrigger = useRef<HTMLButtonElement | null>(null);
 
   // 首次进入：读取后端状态
   useEffect(() => {
@@ -198,11 +216,19 @@ function App({ initial }: AppProps) {
   useEffect(() => {
     const unlisten = onStateUpdate((s) => setState(s));
     const offFailed = onTaskbarTransparentFailed(() => {
-      toastRef.current?.show("任务栏透明开启失败：系统阻止了透明引擎");
+      toastRef.current?.show("任务栏透明开启失败：系统阻止了透明引擎", "error");
+    });
+    const offPwdRequired = onPrivacyPasswordRequired(() => {
+      toastRef.current?.show("请先在设置中设置解锁密码，再开启隐私操作", "warning");
+    });
+    const offPwdReset = onPrivacyPasswordReset(() => {
+      toastRef.current?.show("已用开机 PIN 解锁，旧密码已清除，请在设置中重新设置");
     });
     return () => {
       unlisten();
       offFailed();
+      offPwdRequired();
+      offPwdReset();
     };
   }, []);
 
@@ -238,6 +264,8 @@ function App({ initial }: AppProps) {
       const isPrivacy = activeId === FEATURES[3].id;
       const isAudio = activeId === FEATURES[5].id;
       const isTranslate = activeId === FEATURES[6].id;
+      // 隐私开关可能被后端拒绝（未设置解锁密码），先记下用户意图
+      const wantPrivacyOn = isPrivacy && !state.privacyEnabled;
       const next = isPerformance
         ? await setPerformanceMonitor(!state.performanceMonitor)
         : isPrivacy
@@ -250,6 +278,9 @@ function App({ initial }: AppProps) {
       setState(next);
       if (isPerformance) {
         toastRef.current?.show(next.performanceMonitor ? "性能监控已开启" : "性能监控已关闭");
+      } else if (isPrivacy && wantPrivacyOn && !next.privacyEnabled) {
+        // 后端拒绝开启：privacy-password-required 事件 toast 已提示，
+        // 这里不再弹「已关闭」以免覆盖真正的提示
       } else if (isPrivacy) {
         toastRef.current?.show(
           next.privacyEnabled
@@ -328,6 +359,18 @@ function App({ initial }: AppProps) {
     const next = await setPrivacyBossKey(key);
     setState(next);
     toastRef.current?.show("老板键已更新");
+  }, []);
+
+  const handlePrivacyPasswordSave = useCallback(async (password: string) => {
+    const next = await setPrivacyPassword(password);
+    setState(next);
+    toastRef.current?.show("解锁密码已设置");
+  }, []);
+
+  const handlePrivacyPasswordClear = useCallback(async () => {
+    const next = await clearPrivacyPassword();
+    setState(next);
+    toastRef.current?.show("解锁密码已清除，隐私操作已关闭");
   }, []);
 
   const handleAiPopupEnabledChange = useCallback(async (enabled: boolean) => {
@@ -529,10 +572,30 @@ function App({ initial }: AppProps) {
     }
   }, [state]);
 
-  // 侧边面板（花笺 Floral 式）：设置 / 关于 共用主内容区右侧推开面板
-  const openSettings = useCallback(() => setSidePanel("settings"), []);
-  const openAbout = useCallback(() => setSidePanel("about"), []);
-  const closeSidePanel = useCallback(() => setSidePanel(null), []);
+  // 侧边面板（花笺 Floral 式）：打开后交给标题聚焦，关闭时回到触发按钮。
+  const openSidePanel = useCallback((panel: "settings" | "about", trigger: HTMLButtonElement | null) => {
+    lastSidePanelTrigger.current = trigger;
+    setSidePanel(panel);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`.side-panel.open [data-panel-heading="${panel}"]`)?.focus();
+    });
+  }, []);
+  const closeSidePanel = useCallback(() => {
+    setSidePanel(null);
+    window.requestAnimationFrame(() => lastSidePanelTrigger.current?.focus());
+  }, []);
+  const onFeatureKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = FEATURES.length - 1;
+    let next: number | null = null;
+    if (event.key === "ArrowDown") next = index === last ? 0 : index + 1;
+    if (event.key === "ArrowUp") next = index === 0 ? last : index - 1;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = last;
+    if (next === null) return;
+    event.preventDefault();
+    setActiveId(FEATURES[next].id);
+    featureRefs.current[next]?.focus();
+  }, []);
 
   const feature = FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
   const isTaskbar = activeId === FEATURES[1].id;
@@ -556,7 +619,7 @@ function App({ initial }: AppProps) {
       : "性能监控 · 当前已关闭"
     : isPrivacy
       ? state.privacyActive
-        ? "隐私操作 · 已触发保护，操作鼠标或键盘后自动还原"
+        ? "隐私操作 · 已触发保护，输入密码后还原"
         : "隐私操作 · 空闲超过设定时间自动触发"
       : isAudio
         ? state.audioPanelEnabled
@@ -581,27 +644,26 @@ function App({ initial }: AppProps) {
         </div>
         <div className="titlebar-actions">
           <button
+            ref={settingsTriggerRef}
             className={`icon-btn ${sidePanel === "settings" ? "active" : ""}`}
-            onClick={() => (sidePanel === "settings" ? closeSidePanel() : openSettings())}
+            onClick={() => (sidePanel === "settings" ? closeSidePanel() : openSidePanel("settings", settingsTriggerRef.current))}
             aria-label="设置"
+            aria-expanded={sidePanel === "settings"}
+            aria-controls="settings-panel"
             title="设置"
           >
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3.2" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+            <Icon name="settings" size={17} />
           </button>
           <button
+            ref={aboutTriggerRef}
             className={`icon-btn ${sidePanel === "about" ? "active" : ""}`}
-            onClick={() => (sidePanel === "about" ? closeSidePanel() : openAbout())}
+            onClick={() => (sidePanel === "about" ? closeSidePanel() : openSidePanel("about", aboutTriggerRef.current))}
             aria-label="关于"
+            aria-expanded={sidePanel === "about"}
+            aria-controls="about-panel"
             title="关于"
           >
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 11v5" />
-              <path d="M12 7.5h.01" />
-            </svg>
+            <Icon name="info" size={17} />
           </button>
           <button className="win-btn" onClick={minimize} aria-label="最小化" title="最小化">
             <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
@@ -626,13 +688,16 @@ function App({ initial }: AppProps) {
         <aside className="sidebar noise-bg">
           <div className="sidebar-heading">功能</div>
           <nav className="feature-list">
-            {FEATURES.map((f) => (
+            {FEATURES.map((f, index) => (
               <button
                 key={f.id}
+                ref={(node) => { featureRefs.current[index] = node; }}
                 className={`feature-item ${f.id === activeId ? "active" : ""}`}
                 onClick={() => setActiveId(f.id)}
+                onKeyDown={(event) => onFeatureKeyDown(event, index)}
+                aria-current={f.id === activeId ? "page" : undefined}
               >
-                <span className="feature-icon">{f.icon}</span>
+                <span className="feature-icon"><Icon name={f.icon} size={18} /></span>
                 <span className="feature-name">{f.title}</span>
                 {f.id === activeId && <span className="feature-active-dot" />}
               </button>
@@ -640,7 +705,7 @@ function App({ initial }: AppProps) {
           </nav>
           <div className="sidebar-footer">
           <div className="sidebar-meta">本地纯净工具</div>
-          <div className="sidebar-version">v1.1.0</div>
+          <div className="sidebar-version">v1.4.0</div>
           </div>
         </aside>
 
@@ -670,7 +735,7 @@ function App({ initial }: AppProps) {
           ) : isTaskbar ? (
             <div className="detail-card noise-bg">
               <div className="detail-hero">
-                <div className="detail-icon">{feature.icon}</div>
+                <div className="detail-icon"><Icon name={feature.icon} size={28} /></div>
                 <div className="detail-titles">
                   <h1 className="detail-title">{feature.title}</h1>
                   <p className="detail-subtitle">{feature.subtitle}</p>
@@ -690,6 +755,8 @@ function App({ initial }: AppProps) {
                   checked={state.taskbarTransparent}
                   onChange={() => handleTaskbarTransparent(!state.taskbarTransparent)}
                   disabled={busyToggle}
+                  label="透明任务栏"
+                  busy={busyToggle}
                 />
               </div>
               <div className="setting-row">
@@ -703,6 +770,8 @@ function App({ initial }: AppProps) {
                   checked={state.autohideEnabled}
                   onChange={() => handleAutohideEnabled(!state.autohideEnabled)}
                   disabled={busyToggle}
+                  label="任务栏自动隐藏"
+                  busy={busyToggle}
                 />
               </div>
 
@@ -726,7 +795,7 @@ function App({ initial }: AppProps) {
           ) : (
             <div className="detail-card noise-bg">
               <div className="detail-hero">
-                <div className="detail-icon">{feature.icon}</div>
+                <div className="detail-icon"><Icon name={feature.icon} size={28} /></div>
                 <div className="detail-titles">
                   <h1 className="detail-title">{feature.title}</h1>
                   <p className="detail-subtitle">{feature.subtitle}</p>
@@ -746,7 +815,7 @@ function App({ initial }: AppProps) {
                     <div className="state-hint">{stateHint}</div>
                   </div>
                 </div>
-                <Switch checked={featureOn} onChange={handleToggle} disabled={busyToggle} />
+                <Switch checked={featureOn} onChange={handleToggle} disabled={busyToggle} busy={busyToggle} label={`${feature.title}开关`} />
               </div>
 
               <p className="detail-note">{feature.detail}</p>
@@ -755,13 +824,13 @@ function App({ initial }: AppProps) {
           </div>
 
           <div className="detail-footer">
-            <span className="hint-icon">␣</span>
+            <span className="hint-icon"><Icon name="eye" size={14} /></span>
             {isTaskbar
               ? "透明与自动隐藏互不影响 · 均不写注册表 · 退出应用自动恢复"
               : isPerformance
                 ? "仅本机采集 · 不联网 · 关闭后立即停止采样"
                 : isPrivacy
-                  ? "空闲超时自动保护 · 操作鼠标或键盘立即还原 · 退出应用自动恢复"
+                  ? "空闲超时自动保护 · 需密码还原 · 老板键一键恢复 · 退出应用自动还原"
                   : isAi
                     ? "仅在你发送消息时访问你配置的接口地址 · Key 本地加密保存 · 对话不落盘"
                     : isAudio
@@ -782,6 +851,9 @@ function App({ initial }: AppProps) {
           onCloseToTrayChange={handleCloseToTray}
           privacyIdleSecs={state.privacyIdleSecs}
           onPrivacyIdleChange={handlePrivacyIdle}
+          privacyHasPassword={state.privacyHasPassword}
+          onPrivacyPasswordSave={handlePrivacyPasswordSave}
+          onPrivacyPasswordClear={handlePrivacyPasswordClear}
           privacyBossKey={state.privacyBossKey}
           bossKeyRegistered={state.bossKeyRegistered}
           onBossKeyChange={handleBossKeyChange}

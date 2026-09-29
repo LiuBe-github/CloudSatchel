@@ -30,6 +30,7 @@ fn default_perf_taskbar_items() -> Vec<String> {
     vec![
         "cpu".to_string(),
         "memory".to_string(),
+        "gpu".to_string(),
         "gpu_temp".to_string(),
         "net".to_string(),
     ]

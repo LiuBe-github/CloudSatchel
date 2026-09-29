@@ -22,10 +22,11 @@ export interface AppState {
   privacyEnabled: boolean; // 隐私操作是否激活
   privacyIdleSecs: number; // 隐私操作空闲触发时间（秒）
   privacyActive: boolean; // 隐私操作当前是否已触发
+  privacyHasPassword: boolean; // 是否已设置隐私解锁密码（v1.3.0；未设置时隐私操作不可开启）
   autohideEnabled: boolean; // 任务栏自动隐藏是否激活（开启即隐藏）
   perfIntervalMs: number; // 性能监控采样间隔（毫秒）
   perfTaskbarEnabled: boolean; // 任务栏性能小组件是否显示（默认关闭）
-  perfTaskbarItems: string[]; // 任务栏小组件显示项（顺序即显示顺序："cpu" | "memory" | "net"）
+  perfTaskbarItems: string[]; // 任务栏小组件显示项（顺序即显示顺序，含 cpu/gpu 利用率与温度）
   perfTaskbarOffsetX: number; // 任务栏小组件左右微调（逻辑像素，-150~150）
   aiModel: string; // AI 助手模型名
   aiBaseUrl: string; // AI 助手接口地址（OpenAI 兼容）

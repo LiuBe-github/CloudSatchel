@@ -25,10 +25,11 @@ const FALLBACK_STATE: AppState = {
   privacyEnabled: false,
   privacyIdleSecs: 60,
   privacyActive: false,
+  privacyHasPassword: false,
   autohideEnabled: false,
   perfIntervalMs: 1000,
   perfTaskbarEnabled: false,
-  perfTaskbarItems: ["cpu", "memory", "gpu_temp", "net"],
+  perfTaskbarItems: ["cpu", "memory", "gpu", "gpu_temp", "net"],
   perfTaskbarOffsetX: 0,
   aiModel: "gpt-4o-mini",
   aiBaseUrl: "https://api.openai.com/v1",
@@ -107,6 +108,54 @@ export async function setAutohideEnabled(enabled: boolean): Promise<AppState> {
 export async function setPrivacyBossKey(key: string): Promise<AppState> {
   if (!inTauri()) return fallback({ privacyBossKey: key });
   return (await invoke<AppState>("set_privacy_boss_key", { key })) as AppState;
+}
+
+/** 设置/修改隐私解锁密码（v1.3.0，DPAPI 加密落盘）；空/超长时抛错 */
+export async function setPrivacyPassword(password: string): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyHasPassword: true });
+  return (await invoke<AppState>("set_privacy_password", { password })) as AppState;
+}
+
+/** 清除隐私解锁密码；若隐私操作开启中会一并关闭 */
+export async function clearPrivacyPassword(): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyHasPassword: false });
+  return (await invoke<AppState>("clear_privacy_password")) as AppState;
+}
+
+/** 隐私解锁窗口提交密码；密码错误时抛错 */
+export async function unlockPrivacy(password: string): Promise<AppState> {
+  if (!inTauri()) return fallback({});
+  return (await invoke<AppState>("unlock_privacy", { password })) as AppState;
+}
+
+/** 暂时收起隐私解锁卡片（Esc；保护状态不解除） */
+export async function dismissPrivacyUnlock(): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("dismiss_privacy_unlock");
+}
+
+/** 忘记密码 → Windows Hello（开机 PIN）验证后解锁并清除旧密码；验证失败/不可用时抛错 */
+export async function unlockPrivacyWithHello(): Promise<AppState> {
+  if (!inTauri()) return fallback({ privacyHasPassword: false });
+  return (await invoke<AppState>("unlock_privacy_with_hello")) as AppState;
+}
+
+/** Hello 解锁成功（旧密码已清除）→ 提醒重新设置密码（还原主窗口后由后端延迟推送） */
+export function onPrivacyPasswordReset(cb: () => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen("privacy-password-reset", () => cb());
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}
+
+/** 未设置密码时尝试开启隐私操作（或启动时因缺密码被强制关闭）→ 提醒先设密码 */
+export function onPrivacyPasswordRequired(cb: () => void): () => void {
+  if (!inTauri()) return () => {};
+  const unlisten = listen("privacy-password-required", () => cb());
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
 }
 
 /** 开关 AI 小窗（FR-17） */

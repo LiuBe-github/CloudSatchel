@@ -13,6 +13,7 @@ mod ai;
 mod audio;
 mod autostart;
 mod background;
+mod cpu_temp;
 mod dlog;
 mod fullscreen;
 mod hooks;
@@ -103,6 +104,7 @@ impl Default for AppState {
             perf_taskbar_items: Mutex::new(vec![
                 "cpu".to_string(),
                 "memory".to_string(),
+                "gpu".to_string(),
                 "gpu_temp".to_string(),
                 "net".to_string(),
             ]),
@@ -144,6 +146,7 @@ struct Snapshot {
     privacy_enabled: bool,
     privacy_idle_secs: u32,
     privacy_active: bool,
+    privacy_has_password: bool,
     autohide_enabled: bool,
     perf_interval_ms: u32,
     perf_taskbar_enabled: bool,
@@ -192,6 +195,7 @@ fn snapshot(state: &AppState) -> Snapshot {
         privacy_enabled: *state.privacy_enabled.lock().unwrap(),
         privacy_idle_secs: *state.privacy_idle_secs.lock().unwrap(),
         privacy_active: *state.privacy_active.lock().unwrap(),
+        privacy_has_password: privacy::has_password(),
         autohide_enabled: *state.autohide_enabled.lock().unwrap(),
         perf_interval_ms: *state.perf_interval_ms.lock().unwrap(),
         perf_taskbar_enabled: *state.perf_taskbar_enabled.lock().unwrap(),
@@ -909,7 +913,7 @@ fn set_perf_taskbar_enabled(
     snap
 }
 
-/// 设置任务栏小组件显示项（仅允许 cpu/memory/gpu_temp/net，去重；
+/// 设置任务栏小组件显示项（仅允许 cpu/cpu_temp/memory/gpu/gpu_temp/net，去重；
 /// 顺序即显示顺序；空列表 → 隐藏）
 #[tauri::command]
 fn set_perf_taskbar_items(
@@ -921,7 +925,7 @@ fn set_perf_taskbar_items(
     for raw in items {
         if matches!(
             raw.as_str(),
-            "cpu" | "memory" | "gpu_temp" | "net"
+            "cpu" | "cpu_temp" | "memory" | "gpu" | "gpu_temp" | "net"
         ) && !normalized.contains(&raw)
         {
             normalized.push(raw);
@@ -1035,6 +1039,11 @@ fn set_privacy_enabled(
     state: State<std::sync::Arc<AppState>>,
     enabled: bool,
 ) -> Snapshot {
+    // v1.3.0：未设置解锁密码时不允许开启——保持关闭并通知前端 toast 提醒
+    if enabled && !privacy::has_password() {
+        let _ = app.emit("privacy-password-required", ());
+        return snapshot(&state);
+    }
     {
         let mut e = state.privacy_enabled.lock().unwrap();
         if *e == enabled {
@@ -1050,6 +1059,81 @@ fn set_privacy_enabled(
     let snap = snapshot(&state);
     let _ = app.emit("state-updated", snap.clone());
     snap
+}
+
+/// 设置/修改隐私解锁密码（v1.3.0，DPAPI 加密落盘）
+#[tauri::command]
+fn set_privacy_password(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    password: String,
+) -> Result<Snapshot, String> {
+    privacy::set_password(&password)?;
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    Ok(snap)
+}
+
+/// 清除隐私解锁密码；若隐私操作当前开启则一并关闭并恢复（无密码不允许开启）
+#[tauri::command]
+fn clear_privacy_password(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+) -> Snapshot {
+    privacy::clear_password();
+    let was_enabled = {
+        let mut e = state.privacy_enabled.lock().unwrap();
+        std::mem::replace(&mut *e, false)
+    };
+    if was_enabled {
+        sync_idle(&state);
+        let _ = sync_boss_key(&app, &state);
+        persist(&state);
+    }
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    snap
+}
+
+/// 隐私解锁窗口提交密码：验证通过 → 隐藏卡片并还原全部状态；失败 → Err（前端提示重试）
+#[tauri::command]
+fn unlock_privacy(
+    app: AppHandle,
+    state: State<std::sync::Arc<AppState>>,
+    password: String,
+) -> Result<Snapshot, String> {
+    if privacy::unlock_with_password(&password) {
+        let snap = snapshot(&state);
+        let _ = app.emit("state-updated", snap.clone());
+        Ok(snap)
+    } else {
+        Err("密码错误，请重试".to_string())
+    }
+}
+
+/// 暂时收起密码解锁卡片（Esc；保护状态不解除，下次键鼠操作会再次弹出）
+#[tauri::command]
+fn dismiss_privacy_unlock() {
+    privacy::hide_unlock();
+}
+
+/// 忘记密码 → Windows Hello（开机 PIN）验证后解锁并清除旧密码（v1.4.0）。
+/// async：系统验证弹窗可能阻塞数秒，不能跑在主线程。
+/// 成功后延迟推送 privacy-password-reset（等恢复序列还原主窗口，toast 才可见）。
+#[tauri::command]
+async fn unlock_privacy_with_hello(
+    app: AppHandle,
+    state: State<'_, std::sync::Arc<AppState>>,
+) -> Result<Snapshot, String> {
+    privacy::unlock_with_hello()?;
+    let snap = snapshot(&state);
+    let _ = app.emit("state-updated", snap.clone());
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        let _ = app2.emit("privacy-password-reset", ());
+    });
+    Ok(snap)
 }
 
 /// 设置隐私老板键快捷键（FR-13 扩展）：
@@ -1563,7 +1647,13 @@ fn poll_loop(app: AppHandle, state: std::sync::Arc<AppState>) {
         // wry/Tauri 在窗口 show 时会重置 exstyle（实测音频面板 show 后 EX_APPWINDOW 复现），
         // 需周期确保 TOOLWINDOW 生效（不出现 Alt+Tab / 任务视图）
         if tick % 25 == 0 {
-            for label in ["ai-popup", "audio-panel", "translate-button", "translate-popup"] {
+            for label in [
+                "ai-popup",
+                "audio-panel",
+                "translate-button",
+                "translate-popup",
+                "privacy-unlock",
+            ] {
                 if let Some(win) = app.get_webview_window(label) {
                     make_tool_window(&win);
                 }
@@ -1697,12 +1787,24 @@ pub fn run() {
     *state.performance_monitor.lock().unwrap() = prefs.performance_monitor;
     *state.theme.lock().unwrap() = prefs.theme.clone();
     *state.close_to_tray.lock().unwrap() = prefs.close_to_tray;
-    *state.privacy_enabled.lock().unwrap() = prefs.privacy_enabled;
+    // v1.3.0：未设置解锁密码时不允许开启隐私操作——持久化为开但密码缺失 →
+    // 强制回落为关，setup 完成后延迟 toast 提醒（等前端事件监听就绪）
+    let privacy_password_missing_toast = prefs.privacy_enabled && !privacy::has_password();
+    *state.privacy_enabled.lock().unwrap() =
+        prefs.privacy_enabled && !privacy_password_missing_toast;
     *state.privacy_idle_secs.lock().unwrap() = prefs.privacy_idle_secs;
     *state.autohide_enabled.lock().unwrap() = prefs.autohide_enabled;
     *state.perf_interval_ms.lock().unwrap() = prefs.perf_interval_ms;
     *state.perf_taskbar_enabled.lock().unwrap() = prefs.perf_taskbar_enabled;
-    *state.perf_taskbar_items.lock().unwrap() = prefs.perf_taskbar_items.clone();
+    let mut perf_taskbar_items = prefs.perf_taskbar_items.clone();
+    // 旧默认配置已有 GPU 温度时，自动在其前加入 GPU 利用率；
+    // 若用户已主动移除温度项，则尊重其自定义选择，不强行添加。
+    if !perf_taskbar_items.iter().any(|item| item == "gpu") {
+        if let Some(index) = perf_taskbar_items.iter().position(|item| item == "gpu_temp") {
+            perf_taskbar_items.insert(index, "gpu".to_string());
+        }
+    }
+    *state.perf_taskbar_items.lock().unwrap() = perf_taskbar_items;
     *state.perf_taskbar_offset_x.lock().unwrap() = prefs.perf_taskbar_offset_x;
     *state.ai_model.lock().unwrap() = prefs.ai_model.clone();
     *state.ai_base_url.lock().unwrap() = prefs.ai_base_url.clone();
@@ -1742,6 +1844,11 @@ pub fn run() {
             set_privacy_enabled,
             set_privacy_idle_secs,
             set_privacy_boss_key,
+            set_privacy_password,
+            clear_privacy_password,
+            unlock_privacy,
+            unlock_privacy_with_hello,
+            dismiss_privacy_unlock,
             set_autohide_enabled,
             set_perf_interval_ms,
             set_perf_taskbar_enabled,
@@ -1809,10 +1916,16 @@ pub fn run() {
             perf_widget::set_enabled(*state.perf_taskbar_enabled.lock().unwrap());
             // 隐私操作 / 任务栏自动隐藏：先同步配置再启动空闲轮询
             sync_idle(&state);
-            privacy::start();
             let app_handle = app.handle().clone();
+            privacy::start(app_handle.clone());
             // 辅助窗口：工具窗口样式 + 系统圆角 + WM_NCCALCSIZE 全客户区（彻底无标题栏）
-            for label in ["ai-popup", "audio-panel", "translate-button", "translate-popup"] {
+            for label in [
+                "ai-popup",
+                "audio-panel",
+                "translate-button",
+                "translate-popup",
+                "privacy-unlock",
+            ] {
                 if let Some(win) = app.get_webview_window(label) {
                     make_tool_window(&win);
                     install_nccalc_fix(&win);
@@ -1821,6 +1934,14 @@ pub fn run() {
                         set_click_through_window(&win, true);
                     }
                 }
+            }
+            // v1.3.0：隐私开关因未设密码被强制关闭 → 延迟 toast 提醒（等前端监听就绪）
+            if privacy_password_missing_toast {
+                let app_toast = app_handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(2000));
+                    let _ = app_toast.emit("privacy-password-required", ());
+                });
             }
             // 老板键热键跟随隐私开关恢复注册（注册失败仅降级为空闲触发）
             let _ = sync_boss_key(&app_handle, &state);
@@ -1861,6 +1982,11 @@ pub fn run() {
                 if window.label() == "translate-popup" || window.label() == "translate-button" {
                     // 翻译窗口：关闭 = 隐藏（由全局钩子统一管理显隐）
                     let _ = window.hide();
+                    return;
+                }
+                if window.label() == "privacy-unlock" {
+                    // 密码解锁卡片：关闭 = 暂时收起（保护状态不解除）
+                    privacy::hide_unlock();
                     return;
                 }
                 // 主窗口关闭行为由设置「关闭到托盘」决定：

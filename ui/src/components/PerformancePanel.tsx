@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import type { PerfSnapshot } from "../vite-env";
 import { getPerfSnapshot } from "../lib/bridge";
 import { Switch } from "./Switch";
+import { Icon, type IconName } from "./Icon";
 
 type PerfSection = "cpu" | "gpu" | "memory" | "network";
 
-const SECTIONS: Array<{ id: PerfSection; icon: string; label: string }> = [
-  { id: "cpu", icon: "◍", label: "CPU" },
-  { id: "gpu", icon: "▣", label: "GPU" },
-  { id: "memory", icon: "▤", label: "内存" },
-  { id: "network", icon: "⇅", label: "网络" },
+const SECTIONS: Array<{ id: PerfSection; icon: IconName; label: string }> = [
+  { id: "cpu", icon: "cpu", label: "CPU" },
+  { id: "gpu", icon: "gpu", label: "GPU" },
+  { id: "memory", icon: "memory", label: "内存" },
+  { id: "network", icon: "network", label: "网络" },
 ];
 
 const MAX_POINTS = 60;
@@ -137,7 +138,9 @@ const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
 /** 任务栏小组件可显示的项（id 顺序即默认显示顺序） */
 const WIDGET_ITEMS: Array<{ id: string; label: string }> = [
   { id: "cpu", label: "CPU 占用率" },
+  { id: "cpu_temp", label: "CPU 温度" },
   { id: "memory", label: "内存占用率" },
+  { id: "gpu", label: "GPU 利用率" },
   { id: "gpu_temp", label: "GPU 温度" },
   { id: "net", label: "网络速率" },
 ];
@@ -382,9 +385,9 @@ export function PerformancePanel({
   };
 
   return (
-    <div className="detail-card noise-bg">
+    <div className="detail-card noise-bg performance-card" role="region" aria-label="主机性能监控详情">
       <div className="detail-hero">
-        <div className="detail-icon">▥</div>
+        <div className="detail-icon"><Icon name="performance" size={28} /></div>
         <div className="detail-titles">
           <h1 className="detail-title">主机性能监控</h1>
           <p className="detail-subtitle">参考 Windows 任务管理器性能页，实时查看 CPU、GPU、内存与网络</p>
@@ -416,7 +419,7 @@ export function PerformancePanel({
               </option>
             ))}
           </select>
-          <Switch checked={enabled} onChange={onChange} disabled={busy} />
+          <Switch checked={enabled} onChange={onChange} disabled={busy} busy={busy} label="启用主机性能监控" />
         </div>
       </div>
 
@@ -428,6 +431,7 @@ export function PerformancePanel({
           checked={taskbarEnabled}
           onChange={() => onTaskbarEnabledChange(!taskbarEnabled)}
           disabled={!enabled || busy}
+          label="启用任务栏性能显示"
         />
       </div>
 
@@ -449,7 +453,7 @@ export function PerformancePanel({
                     disabled={!on || index === 0}
                     title="上移"
                   >
-                    ↑
+                    <Icon name="chevron-up" size={16} />
                   </button>
                   <button
                     type="button"
@@ -458,9 +462,9 @@ export function PerformancePanel({
                     disabled={!on || index === taskbarItems.length - 1}
                     title="下移"
                   >
-                    ↓
+                    <Icon name="chevron-down" size={16} />
                   </button>
-                  <Switch checked={on} onChange={() => toggleWidgetItem(id)} />
+                  <Switch checked={on} onChange={() => toggleWidgetItem(id)} label={`任务栏显示${meta.label}`} />
                 </div>
               </div>
             );
@@ -475,7 +479,7 @@ export function PerformancePanel({
                 disabled={taskbarOffsetX <= -OFFSET_LIMIT}
                 title="左移 1px"
               >
-                −
+                <Icon name="minus" size={16} />
               </button>
               <span className="perf-widget-offset">
                 {taskbarOffsetX > 0 ? `+${taskbarOffsetX}` : taskbarOffsetX} px
@@ -487,7 +491,7 @@ export function PerformancePanel({
                 disabled={taskbarOffsetX >= OFFSET_LIMIT}
                 title="右移 1px"
               >
-                +
+                <Icon name="plus" size={16} />
               </button>
             </div>
           </div>
@@ -502,7 +506,7 @@ export function PerformancePanel({
               className={`perf-nav-item ${item.id === section ? "active" : ""}`}
               onClick={() => setSection(item.id)}
             >
-              <span className="perf-nav-icon">{item.icon}</span>
+              <span className="perf-nav-icon"><Icon name={item.icon} size={17} /></span>
               <span>{item.label}</span>
             </button>
           ))}

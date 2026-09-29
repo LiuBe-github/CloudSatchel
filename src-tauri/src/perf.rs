@@ -346,6 +346,14 @@ impl Sampler {
 // ---------------------------------------------------------------------------
 
 fn cpu_temperature() -> Option<f32> {
+    // 数据源链：sysinfo（ACPI/WMI）→ PDH 热区计数器 / HWiNFO 共享内存（cpu_temp 模块）
+    if let Some(t) = sysinfo_temperature() {
+        return Some(t);
+    }
+    crate::cpu_temp::read()
+}
+
+fn sysinfo_temperature() -> Option<f32> {
     let components = sysinfo::Components::new_with_refreshed_list();
     let mut fallback: Option<f32> = None;
     let mut matched: Option<f32> = None;

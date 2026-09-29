@@ -4,10 +4,10 @@
 
 - 产品：云笈 / Cloud Satchel，纯净本地 Windows 桌面工具集
 - 技术栈：React 19 + TypeScript + Vite；Tauri 2 + Rust；WebView2
-- 当前版本：v1.1.0（本地测试版，未打包未发布；上一发布版 v1.0.2）
+- 当前版本：v1.4.0（本地测试版，未提交未打包；上一发布版 v1.1.0）
 - 目标平台：Windows 10 / Windows 11
 - 代码位置：`desktop-tools/`
-- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.28）
+- 需求文档：`CloudSatchel需求文档.md`（工作区根目录，与记忆同步维护，当前 v1.31）
 
 ## 已实现功能
 
@@ -32,10 +32,105 @@
 - **任务栏性能小组件（v1.1.0）：主屏任务栏托盘区（输入法/时钟）左侧的原生 Direct2D 文字组件
   （CPU 占用率 / 内存占用率 / GPU 温度 / 网速，可配置开关与顺序、可左右微调；
   纯展示鼠标穿透，随任务栏/全屏自动隐藏；内容过宽自动分两行）**
+- **CPU 温度（v1.2.0）：数据源链 sysinfo → PDH 热区计数器 → HWiNFO 共享内存（`cpu_temp.rs`），
+  任务栏小组件新增「CPU 温度」显示项（默认关），主面板 CPU 温度任一源可用即显示真实值**
+- **隐私解锁密码（v1.3.0）：空闲触发后键鼠操作弹出居中密码卡片（privacy-unlock 窗口），
+  验证通过才还原；老板键直接恢复不经过密码；DPAPI 加密存 privacy-key.bin；
+  未设置密码不允许开启隐私操作（开启被拒 + toast 提醒）**
+- **忘记密码（v1.4.0）：解锁卡片「忘记密码？用开机 PIN 解锁」→ Windows Hello
+  （UserConsentVerifier）系统验证，通过则清除旧密码并还原（隐私开关保持开），
+  还原后 toast 提醒重设密码；本机无 Hello/PIN 提示无法找回**
 
 ## 最近完成
 
-- 2026-09-22 **v1.1.0 主机性能监控 · 任务栏小组件（Direct2D 原生渲染）**（本地测试版，未发布）
+- 2026-09-25 **v1.4.0 忘记密码（Windows Hello 找回）+ 设置面板排版 + toast 修复（本地测试版，未提交/未打包）**
+  - 需求（用户三条）：① 解锁卡片提供忘记密码入口，输入开机 PIN 才能解锁；② 设置面板
+    「解锁密码（已设置）」行 label 被挤成竖排单字，描述与输入要换行；③ 未设密码点隐私
+    总开关看不到提示（「点了没用」）。
+  - 忘记密码（用户拍板：验证通过 → 解锁并清除旧密码，隐私开关保持开，toast 提醒重设）：
+    - Cargo windows 0.61 新增 feature `Security_Credentials_UI`
+    - privacy.rs `unlock_with_hello()`：CoInit MTA → CheckAvailabilityAsync（无 Hello/PIN →
+      Err 中文提示）→ RequestVerificationAsync；Verified → **内部 clear_password()（仅删文件，
+      严禁复用 clear_privacy_password 命令——它会连带关隐私开关）** + hide_unlock +
+      restore_privacy_async；Canceled/其他 → Err
+    - lib.rs `unlock_privacy_with_hello` 命令（**async**，Hello 弹窗阻塞数秒不能跑主线程；
+      async 命令含 State 参数需写 `State<'_, ...>` 否则 E0726）；成功后延迟 1200ms emit
+      `privacy-password-reset`（等恢复序列还原主窗口，toast 才可见）
+    - 前端：bridge `unlockPrivacyWithHello` / `onPrivacyPasswordReset`；PrivacyUnlock.tsx
+      「忘记密码？用开机 PIN 解锁」文本按钮 + helloBusy 态（按钮文案「等待系统验证…」）；
+      App.tsx 监听 toast「已用开机 PIN 解锁，旧密码已清除，请在设置中重新设置」
+  - 排版修复（根因：侧栏内容仅 280px，`.setting-row` flex 不换行，右侧 150px input +
+    修改/清除两按钮 ≈278px 超宽 → label 压到近 0 宽逐字断行）：styles.css 新增修饰类
+    `.setting-row--stack`（column 堆叠 + hotkey-input flex:1），SettingsPanel 隐私分组
+    三行（解锁密码/触发空闲时间/老板键）套用；**不改基类**，AI 小窗快捷键行不受影响
+  - toast 覆盖修复（根因：set_privacy_enabled 拒绝时 emit 事件 toast 先弹，handleToggle
+    随后又弹「隐私操作已关闭」，单例 Toast 覆盖）：handleToggle 记 `wantPrivacyOn`，
+    「请求开启但结果为关」分支跳过通用 toast
+  - 验证：cargo test 22 全过；tsc 通过；Hello 弹窗链路需真机验证
+  - 需求文档 v1.31；版本号全链路 1.3.0 → 1.4.0
+
+- 2026-09-25 **v1.3.0 隐私解锁密码（本地测试版，未提交/未打包）**
+  - 需求：隐私触发后键鼠操作要输密码才能还原（防君子不防小人）；密码可自设，无密码时
+    提醒先设置。用户拍板：老板键直接恢复（不经过密码）；解锁界面用居中密码卡片（非全屏锁屏）。
+  - 后端 `privacy.rs`：
+    - DPAPI 密码存取（与 ai.rs 同套 CryptProtectData 模式）存 `privacy-key.bin`；
+      `has_password/set_password/clear_password/verify_password`（normalize：去首尾空白、
+      非空、≤64 字符）
+    - `static APP: OnceLock<AppHandle>` + `start(app)` 注入句柄；`show_unlock/hide_unlock`
+      （UNLOCK_VISIBLE 幂等防重复 show）；`unlock_with_password` = 验证通过 → hide + restore
+    - poll_loop 输入恢复分支：有密码 → show_unlock；无密码 → 原样 restore（向后兼容）
+    - 老板键分支不动（直接 restore）；restore_privacy_async 成功后 hide_unlock 兜底
+  - `lib.rs`：新命令 set_privacy_password / clear_privacy_password / unlock_privacy /
+    dismiss_privacy_unlock；`set_privacy_enabled` 开启且无密码 → emit privacy-password-required
+    + 拒绝开启；clear 密码时若开启中则一并关；启动时 prefs.privacy_enabled && 无密码 →
+    强制关 + setup 后延迟 2s toast（用 run() 里局部布尔 + setup 闭包 emit，因 prefs 恢复
+    在 builder 之前拿不到 app handle）；Snapshot 新增 privacy_has_password（live 计算）
+  - tauri.conf：新增 privacy-unlock 窗口（400×300 透明无边框置顶 center focusable）+ capabilities
+    + 两处辅助窗口样式修复列表加入；on_window_event privacy-unlock 关闭=hide_unlock
+  - 前端：PrivacyUnlock.tsx（居中纸感卡片 + 输错抖动 + Esc 收起）；main.tsx 路由；
+    SettingsPanel「隐私操作→解锁密码」行（设置/修改/清除，已设置态标题）；App.tsx
+    onPrivacyPasswordRequired toast + 文案更新；bridge/vite-env 同步；版本 v1.3.0
+  - 验证：cargo test 22 项全过（新增 2 项：DPAPI 往返、密码 normalize）；tsc+vite 通过
+  - 注意：解锁是「防君子不防小人」级——杀进程/退出应用仍会完整还原（纯净性约定），
+    真锁屏需替换 winlogon 不在范围内
+  - 状态：按约定只更新本地测试版，不提交不打包
+
+- 2026-09-25 **v1.2.0 CPU 温度数据源链（本地测试版，未提交/未打包）**
+  - 背景：v1.1.0 因「不提权/不装驱动」约定砍掉 CPU 温度；用户要求找合法读取办法。
+    结论：纯用户态读 CPU 温度在 Windows 上原理性无解（温度在 MSR/SMN ring-0 资源），
+    合法路径 = 让已签名/已装驱动的组件去读、云笈普通权限取数据。经用户确认按 A+C 方案实现。
+  - 新增 `src-tauri/src/cpu_temp.rs`：数据源链 `read()` = PDH 热区 → HWiNFO 共享内存；
+    perf.rs 的 `cpu_temperature()` 改为 sysinfo → cpu_temp::read()
+    - **PDH**：`\Thermal Zone Information(*)\\Temperature`（PdhAddEnglishCounterW 英文路径
+      免区域设置问题，windows-sys 需 Win32_System_Performance）；瞬时值计数器一次采集即可；
+      多热区取最高；K→°C（个别系统 1/10 K 上报，>1000 先除 10；0~150°C 外拒绝）
+    - **HWiNFO SM2**：`Global\HWiNFO_SENS_SM2` 只读映射（OpenFileMappingW/MapViewOfFile，
+      windows 0.61 需 Win32_System_Memory）；**布局按 namazso 逆向实测 pack(1)**：
+      头部 44 字节（magic 'SiWH'=0x48576953），读数元素 316 字节、value f64 在 **0x11C**
+      （官方头默认对齐会是 0x120，但真实内存是 packed——曾按元素尺寸≥320 猜对齐布局，
+      实测启发式 316≥296 误判，单测抓到 Some(0.0)，已改为恒取 packed 偏移）；
+      标签优先级 Tctl/Tdie(0) → CPU Package(1) → Package+CPU 传感器(2) → CPU 传感器+CPU 标签(3)；
+      头部字段合法性校验（元素数 ≤4096、总跨度 ≤4MB）防撕裂头部导致越界读
+  - 小组件：`ItemKind::CpuTemp`（id `cpu_temp`，标签 `CPU`，格式 `55°C`，阈值 >75 橙 >85 红，
+    读不到 `--`）；lib.rs set_perf_taskbar_items 白名单加 `cpu_temp`；
+    PerformancePanel WIDGET_ITEMS 加「CPU 温度」（紧跟 CPU 占用率）；prefs 默认显示项不变
+  - 版本号全链路 1.1.0 → 1.2.0；cargo test 20 项全过（新增 7 项：K 转换、标签优先级、
+    SM2 packed 解析正/反例、小组件 cpu_temp 片段与配色、白名单）
+  - 文档：需求文档 v1.29（新增 FR-20 任务栏性能小组件章节 + 第 8 节范围）
+  - **注意**：HWiNFO 免费版共享内存约 12 小时后自动关闭需重启 HWiNFO（Pro 无此限制）；
+    用户机器（Legion/5800H）ACPI 热区不存在，实际生效的是 HWiNFO 源（需用户自装并开启
+    Shared Memory Support）
+  - 状态：按约定只更新本地测试版（npm run tauri build -- --no-bundle），不提交不打包
+
+- 2026-09-25 **v1.1.0 已发布** ✅
+  - commit `9f78d89` + tag `v1.1.0`（已推送 origin main，含此前未推送的 `41f79c9`）
+  - GitHub Release: https://github.com/LiuBe-github/CloudSatchel/releases/tag/v1.1.0
+  - 资产 `CloudSatchel_1.1.0_x64-setup.exe`（3,083,486 字节 ≈2.94MB，sha256 82c106bf…6e7464）
+  - 发布流程沿用既有链路：npm run release（4m13s）→ gh release create --notes-file
+    （GH_TOKEN 从 git credential fill 提取），GitHub 网络正常无需 curloptResolve
+  - 发布说明文件：`dev/_release_notes_v1.1.0.md`（未入库，可复用作模板）
+
+- 2026-09-22 **v1.1.0 主机性能监控 · 任务栏小组件（Direct2D 原生渲染）**（已发布，见上）
   - 需求：TrafficMonitor 式任务栏组件，贴在系统托盘区（输入法/时钟）左侧；经 12 轮问答锁定：
     文字数值（带标签 CPU 12% · 内存 45% · ↑1.2M ↓8.4M）、纯展示鼠标穿透、托盘左侧固定+可微调、
     仅主屏、跟随任务栏显隐、Direct2D 渲染、每项可开关+排序、详情页子开关（默认关）、
@@ -640,14 +735,16 @@
 ## 会话交接状态（2026-09 更新，供新会话"读取记忆"恢复上下文）
 
 **当前版本与发布**
-- 最新代码：**v1.1.0 任务栏性能小组件（本地测试版，未提交/未打包）**；上一发布版
-  **v1.0.2**（commit `f245b4d`，tag v1.0.2，GitHub Release 已创建）
-- 已发布线：v0.7.x ~ v0.20.11 + v1.0.0（`109304b`）+ **v1.0.2（`f245b4d`）**；
+- 最新代码：**v1.4.0 忘记密码（Windows Hello）+ 排版/toast 修复（本地测试版，未提交/未打包）**；
+  上一发布版 **v1.1.0**（commit `9f78d89`，tag v1.1.0，2026-09-25 GitHub Release 已创建）
+- 已发布线：v0.7.x ~ v0.20.11 + v1.0.0（`109304b`）+ v1.0.2（`f245b4d`）+ **v1.1.0（`9f78d89`）**；
   v1.0.1 仅本地存档（不发布）
-- git 状态：main 领先 origin 1 个提交（`41f79c9` 记忆目录规范化）；本轮 v1.1.0 改动未提交
+- git 状态：main 与 origin/main 同步；本轮未提交改动 = v1.2.0（cpu_temp.rs CPU 温度数据源链）
+  + v1.3.0（privacy.rs 解锁密码 + privacy-unlock 窗口 + 前端 + 版本号）
+  + v1.4.0（privacy.rs unlock_with_hello + Windows Hello 找回 + 设置面板堆叠排版 + toast 覆盖修复 + 需求文档 v1.31）
 - 待办：用户坏机器取证（音频/任务栏/翻译三功能，v1.0.2 已带全链路诊断日志），
-  按 hooks-debug.log 定向修复；后续版本号从 1.0.3 起
-- 版本线：… → v1.0.0 正式版 → v1.0.1（存档点，未发布）→ v1.0.2 界面美化+AI Markdown+兼容性加固 → **v1.1.0 任务栏性能小组件**
+  按 hooks-debug.log 定向修复；后续版本号从 1.4.1 起
+- 版本线：… → v1.1.0 任务栏性能小组件 → v1.2.0 CPU 温度数据源链 → v1.3.0 隐私解锁密码 → **v1.4.0 忘记密码（Hello）**
 - 版本线：v0.9.0 开关记忆 → v0.10.x 隐私/自动隐藏/动画 → v0.11.x AI 助手+BaseURL/主题/性能 → v0.12.x 托盘快捷开关/TranslucentTB 修复 → v0.13.0 老板键 → v0.14.0 AI 小窗 → v0.15.0 音频识别 → v0.16.x 面板修复/标题框终案 → v0.17.0 移除桌宠/音频识别入功能列表 → v0.18.0 封面/主题色/波形 → v0.19.0 面板透明度/穿透（移除拖拽） → v0.19.1 SMTC 事件驱动（CPU 修复） → v0.19.2 封面缓存修复+空封面占位 → v0.20.0 鼠标选取翻译+音量条 → v0.20.1 翻译虚框修复/移入功能列表+波形幅度 → v1.0.0 正式版 → v1.0.1 兼容性加固+AI Markdown
 
 **需求文档当前状态**

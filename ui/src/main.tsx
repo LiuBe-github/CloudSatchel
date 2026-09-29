@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import AiPopup from "./components/AiPopup";
 import AudioPanel from "./components/AudioPanel";
+import PrivacyUnlock from "./components/PrivacyUnlock";
 import TranslateButton from "./components/TranslateButton";
 import TranslatePopup from "./components/TranslatePopup";
 import { inTauri } from "./lib/bridge";
@@ -20,6 +21,8 @@ createRoot(document.getElementById("root")!).render(
     <TranslateButton />
   ) : label === "translate-popup" ? (
     <TranslatePopup />
+  ) : label === "privacy-unlock" ? (
+    <PrivacyUnlock />
   ) : (
     <App />
   ),

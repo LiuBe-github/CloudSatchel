@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="云笈">
+  <defs>
+    <linearGradient id="bamboo" x1="28" y1="20" x2="228" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F7255"/>
+      <stop offset="1" stop-color="#123A29"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="91" y1="52" x2="169" y2="197" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3F0DF"/>
+      <stop offset="1" stop-color="#C7E0C5"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="62" fill="url(#bamboo)"/>
+  <path d="M181 47c-39 18-69 52-91 105-7 17-11 34-12 48 14-11 27-26 38-45 28-48 50-82 65-108Z" fill="url(#paper)"/>
+  <path d="M71 91c20 5 37 15 53 29-17-2-35-7-53-18Z" fill="#D9E9CD" opacity=".94"/>
+  <path d="M105 60c6 15 10 30 10 45-8-14-13-29-15-45Z" fill="#D9E9CD" opacity=".78"/>
+  <path d="M73 204c27-26 51-63 74-111" fill="none" stroke="#F6F3E8" stroke-width="7" stroke-linecap="round"/>
+  <path d="M192 173h-22l22-22Z" fill="#A8D1AB" opacity=".7"/>
+</svg>

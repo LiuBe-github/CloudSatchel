@@ -16,6 +16,11 @@
 //!   老板键触发后仅响应老板键恢复，鼠标/键盘操作不恢复（避免老板在场时误恢复）；
 //!   关闭「隐私操作」开关或退出应用仍会完整恢复。
 //!
+//! - 解锁密码（v1.3.0）：设置密码后，空闲触发的保护在检测到鼠标/键盘操作时
+//!   不再直接还原，而是弹出居中密码卡片（privacy-unlock 窗口），验证通过才还原；
+//!   老板键恢复不经过密码（老板键是用户自己的秘密热键）。密码用 DPAPI 加密存
+//!   `privacy-key.bin`，磁盘无明文；未设置密码时不允许开启隐私操作（前端 toast 提醒）。
+//!
 //! 纯净性：不写注册表、不联网；退出（stop）时完整恢复所有状态。
 
 #![allow(non_snake_case)]
@@ -25,12 +30,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use tauri::{AppHandle, Manager};
+
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    COINIT_MULTITHREADED,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -95,6 +103,10 @@ static BOSS_TRIGGERED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_LOCK: Mutex<()> = Mutex::new(());
 /// 任务栏自动隐藏是否由本应用通过 ABM_SETSTATE 设置（恢复的唯一依据）
 static AUTOHIDE_APPLIED: AtomicBool = AtomicBool::new(false);
+/// 应用句柄（弹出密码解锁窗口用，start 时注入）
+static APP: OnceLock<AppHandle> = OnceLock::new();
+/// 密码解锁窗口当前是否可见（防止重复 show）
+static UNLOCK_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 /// 隐私触发时保存的现场（恢复的唯一依据，见工程约定 10）
 struct PrivacySnapshot {
@@ -119,7 +131,8 @@ struct SavedWindow {
 // ---------------------------------------------------------------------------
 
 /// 启动空闲检测轮询线程（幂等）
-pub fn start() {
+pub fn start(app: AppHandle) {
+    let _ = APP.set(app);
     RUNNING.store(true, Ordering::SeqCst);
     THREAD.get_or_init(|| {
         std::thread::spawn(poll_loop);
@@ -130,6 +143,7 @@ pub fn start() {
 /// 退出应用 / 关闭全部相关开关时调用。
 pub fn stop() {
     RUNNING.store(false, Ordering::SeqCst);
+    hide_unlock();
     if PRIVACY_TRIGGERED.load(Ordering::SeqCst) {
         // 同步执行恢复（此时触发线程若在跑，等它写完现场再恢复）
         let _guard = ACTIVE_LOCK.lock().unwrap();
@@ -272,8 +286,13 @@ fn poll_loop() {
                     && !BOSS_TRIGGERED.load(Ordering::SeqCst)
                 {
                     // 老板键触发后仅响应老板键恢复，鼠标/键盘操作不恢复（需求 FR-13 扩展）
-                    dlog::write("[privacy] user input detected -> restore");
-                    restore_privacy_async();
+                    if has_password() {
+                        // v1.3.0：已设密码 → 弹密码卡片，验证通过才还原（防旁人碰键鼠即恢复）
+                        show_unlock();
+                    } else {
+                        dlog::write("[privacy] user input detected -> restore");
+                        restore_privacy_async();
+                    }
                 }
             }
             // FR-02 开关二（自动隐藏）不依赖空闲检测：开启即隐藏，见 configure；
@@ -374,6 +393,7 @@ fn restore_privacy_async() {
         if !PRIVACY_TRIGGERED.swap(false, Ordering::SeqCst) {
             return;
         }
+        hide_unlock();
         let snap = PRIVACY_SNAPSHOT.lock().unwrap().take();
         if let Some(s) = snap {
             restore_sequence(&s);
@@ -582,5 +602,230 @@ fn set_system_mute(mute: bool) -> bool {
             CoUninitialize();
         }
         result.is_ok()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 解锁密码（v1.3.0，DPAPI 加密落盘，磁盘无明文；与 ai.rs 同一套加密模式）
+// ---------------------------------------------------------------------------
+
+const PASSWORD_FILE_NAME: &str = "privacy-key.bin";
+/// 密码长度上限（防止异常输入）
+const PASSWORD_MAX_LEN: usize = 64;
+
+fn password_path() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("CloudSatchel")
+        .join(PASSWORD_FILE_NAME)
+}
+
+fn dpapi_encrypt(plain: &str) -> Result<Vec<u8>, String> {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+    unsafe {
+        let bytes = plain.as_bytes();
+        let in_blob = CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_ptr() as *mut u8,
+        };
+        let mut out_blob = CRYPT_INTEGER_BLOB::default();
+        CryptProtectData(
+            &in_blob,
+            windows::core::PWSTR::null(),
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut out_blob,
+        )
+        .map_err(|e| format!("DPAPI 加密失败: {e}"))?;
+        let out = std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(out_blob.pbData as *mut core::ffi::c_void)));
+        Ok(out)
+    }
+}
+
+fn dpapi_decrypt(data: &[u8]) -> Result<String, String> {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
+    unsafe {
+        let in_blob = CRYPT_INTEGER_BLOB {
+            cbData: data.len() as u32,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut out_blob = CRYPT_INTEGER_BLOB::default();
+        CryptUnprotectData(&in_blob, None, None, None, None, 0, &mut out_blob)
+            .map_err(|e| format!("DPAPI 解密失败: {e}"))?;
+        let out = std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(out_blob.pbData as *mut core::ffi::c_void)));
+        String::from_utf8(out).map_err(|_| "密码解码失败".to_string())
+    }
+}
+
+/// 密码规范化：去首尾空白；空 / 超长 → Err
+fn normalize_password(raw: &str) -> Result<String, String> {
+    let pw = raw.trim();
+    if pw.is_empty() {
+        return Err("密码不能为空".to_string());
+    }
+    if pw.chars().count() > PASSWORD_MAX_LEN {
+        return Err(format!("密码过长（最多 {PASSWORD_MAX_LEN} 个字符）"));
+    }
+    Ok(pw.to_string())
+}
+
+/// 是否已设置解锁密码（加密文件存在即视为已设置）
+pub fn has_password() -> bool {
+    password_path().is_file()
+}
+
+/// 设置/修改解锁密码（覆盖旧密码）
+pub fn set_password(raw: &str) -> Result<(), String> {
+    let pw = normalize_password(raw)?;
+    let encrypted = dpapi_encrypt(&pw)?;
+    let path = password_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, encrypted).map_err(|e| e.to_string())?;
+    dlog::write("[privacy] password updated");
+    Ok(())
+}
+
+/// 清除解锁密码（文件删除；隐私开关应随之不可开启，由调用方控制）
+pub fn clear_password() {
+    let _ = std::fs::remove_file(password_path());
+    dlog::write("[privacy] password cleared");
+}
+
+/// 校验密码：与落盘密文解密后比对（未设置密码 / 文件损坏 → false）
+pub fn verify_password(raw: &str) -> bool {
+    let Ok(data) = std::fs::read(password_path()) else {
+        return false;
+    };
+    let Ok(stored) = dpapi_decrypt(&data) else {
+        return false;
+    };
+    stored == raw.trim()
+}
+
+// ---------------------------------------------------------------------------
+// 密码解锁窗口（privacy-unlock）
+// ---------------------------------------------------------------------------
+
+/// 弹出密码解锁卡片（幂等；保护状态不变，仅多一个解锁入口）
+pub fn show_unlock() {
+    if UNLOCK_VISIBLE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(app) = APP.get() else {
+        UNLOCK_VISIBLE.store(false, Ordering::SeqCst);
+        return;
+    };
+    if let Some(win) = app.get_webview_window("privacy-unlock") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        dlog::write("[privacy] input detected with password set -> show unlock window");
+    }
+}
+
+/// 隐藏密码解锁卡片（Esc 暂时收起 / 还原成功 / 退出清理；保护状态不受影响）
+pub fn hide_unlock() {
+    if !UNLOCK_VISIBLE.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Some(app) = APP.get() {
+        if let Some(win) = app.get_webview_window("privacy-unlock") {
+            let _ = win.hide();
+        }
+    }
+}
+
+/// 用密码解锁：验证通过 → 隐藏卡片并执行恢复序列；失败 → false（前端提示重试）
+pub fn unlock_with_password(raw: &str) -> bool {
+    if !verify_password(raw) {
+        dlog::write("[privacy] unlock: wrong password");
+        return false;
+    }
+    dlog::write("[privacy] unlock: password ok -> restore");
+    hide_unlock();
+    restore_privacy_async();
+    true
+}
+
+/// 忘记密码 → Windows Hello（开机 PIN / 生物识别）系统验证（v1.4.0）。
+/// 验证通过：清除旧密码（隐私开关保持开启）+ 隐藏卡片 + 执行恢复序列；
+/// 不可用 / 取消 / 失败 → Err（前端提示，可继续输密码）。
+/// 注意：必须走内部 clear_password（仅删文件），不能复用 clear_privacy_password
+/// 命令（后者会把隐私开关一并关闭）。
+/// 调用方需保证在异步命令线程中执行（系统验证弹窗会阻塞数秒）。
+pub fn unlock_with_hello() -> Result<(), String> {
+    use windows::Security::Credentials::UI::{
+        UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
+    };
+    unsafe {
+        // WinRT 异步调用需 COM 初始化（MTA）；仅本线程由我们初始化时才反初始化
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let need_uninit = hr.0 == 0;
+        let result = (|| -> Result<(), String> {
+            let availability = UserConsentVerifier::CheckAvailabilityAsync()
+                .and_then(|op| op.get())
+                .map_err(|e| format!("Windows Hello 查询失败: {e}"))?;
+            if availability != UserConsentVerifierAvailability::Available {
+                return Err("本机未设置开机 PIN / Windows Hello，无法用系统验证找回密码".to_string());
+            }
+            let verified = UserConsentVerifier::RequestVerificationAsync(
+                &windows::core::HSTRING::from("验证开机 PIN 以解锁云笈并清除已忘记的密码"),
+            )
+            .and_then(|op| op.get())
+            .map_err(|e| format!("Windows Hello 验证失败: {e}"))?;
+            match verified {
+                UserConsentVerificationResult::Verified => {
+                    dlog::write("[privacy] unlock: hello verified -> clear password + restore");
+                    clear_password();
+                    hide_unlock();
+                    restore_privacy_async();
+                    Ok(())
+                }
+                UserConsentVerificationResult::Canceled => Err("已取消系统验证".to_string()),
+                other => Err(format!("系统验证未通过（{other:?}）")),
+            }
+        })();
+        if need_uninit {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 单元测试
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DPAPI 加密/解密往返 + 密文不含明文
+    #[test]
+    fn dpapi_roundtrip_keeps_password_private() {
+        let pw = "yunji-test-123";
+        let enc = dpapi_encrypt(pw).expect("encrypt");
+        assert!(!String::from_utf8_lossy(&enc).contains("yunji"), "密文不应包含明文");
+        assert_eq!(dpapi_decrypt(&enc).expect("decrypt"), pw);
+    }
+
+    /// 密码规范化：空白剔除 / 空密码拒绝 / 超长拒绝
+    #[test]
+    fn normalize_password_validation() {
+        assert_eq!(normalize_password("  abc123 ").unwrap(), "abc123");
+        assert!(normalize_password("   ").is_err());
+        assert!(normalize_password("").is_err());
+        assert!(normalize_password(&"x".repeat(PASSWORD_MAX_LEN + 1)).is_err());
+        assert!(normalize_password(&"x".repeat(PASSWORD_MAX_LEN)).is_ok());
     }
 }
